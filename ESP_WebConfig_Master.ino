@@ -424,7 +424,9 @@ void loop ( void ) {
   // if we aren't connected to a browser, rxbuf will overflow
   // TODO: try to log rxbuf to a server
   // HACK: For now, just dump 
-  if ( config.Logging && (rxbuf.length()>0 || digitalRead(WAS_BLINK)) ) {
+  if ( ( config.Logging && ( rxbuf.length()>0 || digitalRead(WAS_BLINK) ) )
+  //TODO: OR... every so many wakeups.
+  ) {
     streamURL = config.streamServerURL;// + server.arg("name");
     if (!http.begin(streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf) + "&blink=" + (String) (digitalRead(WAS_BLINK)? "YES": "NO") ) ) {
       debug("Failed to open ",streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf));
@@ -433,8 +435,18 @@ void loop ( void ) {
       int httpCode = http.GET(); //blocking TODO: Timeout?
       if (HTTP_CODE_OK==httpCode) {
         //TODO: Server response can set sleep interval and send data to device.
-        debugln("logged",http.getString());
-        rxbuf="";
+        rxbuf=http.getString();
+        debugln("logged. Response:",rxbuf);
+        //TODO: If we got a command to send to the device, initiate the connection 
+        if ( rxbuf.length()>0 ) {
+          digitalWrite(SERIAL_ENABLE_PIN, HIGH);
+          delay(5); //give the RS232 transceiver / level converter time to respond
+          writeStr_x(rxbuf); //pass on the servers response
+          Serial.flush(); //complete the send before going on
+          delay(10); //give the device time to respond
+          checkSerial(10); // get any text that comes back now
+          }
+        digitalWrite(CLEAR_BLINK, LOW); //disable any further blinks while we are awake.
         }
       else { 
         debugln("Logging failed to ",streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf));
@@ -463,6 +475,8 @@ void loop ( void ) {
     && !AdminEnabled        //not in admin mode
       ) {                   //then lets go to sleep
         debugln("SwitchOff","");
+        digitalWrite(CLEAR_BLINK, HIGH); //allow new blinks to be detected
+        //TODO: Drop the connection to the device.
 //        ESP.rtcUserMemoryWrite(0, (uint32_t*) &rtcmem, sizeof(rtcmem)); //write data to RTC memory so we don't loose it.
         //TODO: Compensate for how long we have already been awake. e.g. (Interval - DateTime.Seconds)
 //        ESP.deepSleep(Interval * MICROSECONDS, WAKE_NO_RFCAL); //deep sleep, assume RF ok, wake back up in setup.

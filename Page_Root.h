@@ -25,7 +25,7 @@ const char PAGE_Root[] PROGMEM = R"=====(
     <script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jquery/1.3/jquery.min.js'></script>
     <script type='text/javascript'>
 $('#msg').submit(function(){ 
-    var clientmsg = $('#txt').val()+'\n';
+    var clientmsg = $('#txt').val()+'\r';
     var log=$('#log');
     log.html(log.html()+'<b>'+clientmsg+'</b>');
     $.get('data', {text: clientmsg}, function(html){
