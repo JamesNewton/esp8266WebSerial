@@ -1,6 +1,11 @@
 const char PAGE_NetworkConfiguration[] PROGMEM = R"=====(
+<!DOCTYPE html>
+<HTML>
+<HEAD>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+</HEAD>
+<BODY>
 <a href="admin.html"  class="btn btn--s">&lt;</a>&nbsp;&nbsp;<strong>Network Configuration</strong>
 <hr>
 Connect to Router with these settings:<br>
@@ -12,7 +17,7 @@ Connect to Router with these settings:<br>
 <tr><td align="right">IP:     </td><td><input type="text" id="ip_0" name="ip_0" size="3">.<input type="text" id="ip_1" name="ip_1" size="3">.<input type="text" id="ip_2" name="ip_2" size="3">.<input type="text" id="ip_3" name="ip_3" value="" size="3"></td></tr>
 <tr><td align="right">Netmask:</td><td><input type="text" id="nm_0" name="nm_0" size="3">.<input type="text" id="nm_1" name="nm_1" size="3">.<input type="text" id="nm_2" name="nm_2" size="3">.<input type="text" id="nm_3" name="nm_3" size="3"></td></tr>
 <tr><td align="right">Gateway:</td><td><input type="text" id="gw_0" name="gw_0" size="3">.<input type="text" id="gw_1" name="gw_1" size="3">.<input type="text" id="gw_2" name="gw_2" size="3">.<input type="text" id="gw_3" name="gw_3" size="3"></td></tr>
-<tr><td colspan="2" align="center"><input type="submit" style="width:150px" class="btn btn--m btn--blue" value="Save"></td></tr>
+<tr><td colspan="2" align="center"><input disabled id="save" type="submit" style="width:150px" class="btn btn--m btn--blue" value="Save"></td></tr>
 </table>
 </form>
 <hr>
@@ -27,6 +32,7 @@ Connect to Router with these settings:<br>
 <script>
 
 function GetState() {
+  document.getElementById("networks").innerHTML = "Scanning...";
 	setValues("/admin/connectionstate");
   }
 function selssid(value){
@@ -34,18 +40,29 @@ function selssid(value){
   }
 
 window.onload = function () {
+  
 	load("style.css","css", function() {
 		load("microajax.js","js", function() {
   	  setValues("/admin/values");
+      document.getElementById("save").disabled = false; 
 			setTimeout(GetState,3000);
 		  });
 	  });
   }
   
-function load(e,t,n){if("js"==t){var a=document.createElement("script");a.src=e,a.type="text/javascript",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)}else if("css"==t){var a=document.createElement("link");a.href=e,a.rel="stylesheet",a.type="text/css",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)}}
-
+function load(e,t,n){
+  if("js"==t){
+      var a=document.createElement("script");
+      a.src=e,a.type="text/javascript",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)
+      }
+   else if("css"==t){
+    var a=document.createElement("link");
+    a.href=e,a.rel="stylesheet",a.type="text/css",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)
+    }
+  }
 </script>
-
+</BODY>
+</HTML>
 
 )=====";
 

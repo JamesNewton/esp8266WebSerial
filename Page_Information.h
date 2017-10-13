@@ -2,8 +2,13 @@
 #define PAGE_INFOMATION_H
 
 const char PAGE_Information[] PROGMEM = R"=====(
+<!DOCTYPE html>
+<HTML>
+<HEAD>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+</HEAD>
+<BODY>
 <link rel="stylesheet" href="style.css" type="text/css" />
 <script src="microajax.js"></script> 
 <a href="admin.html"  class="btn btn--s">&lt;</a>&nbsp;&nbsp;<strong>Network Information</strong>
@@ -18,43 +23,42 @@ const char PAGE_Information[] PROGMEM = R"=====(
 <tr><td colspan="2"><hr></span></td></tr>
 <tr><td align="right">NTP Time:</td><td><span id="x_ntp"></span></td></tr>
 
-
 <tr><td colspan="2" align="center"><a href="javascript:GetState()" class="btn btn--m btn--blue">Refresh</a></td></tr>
 </table>
 <script>
 
-function GetState()
-{
+function GetState() {
 	setValues("/admin/infovalues");
-}
+  }
 
-window.onload = function ()
-{
-	load("style.css","css", function() 
-	{
-		load("microajax.js","js", function() 
-		{
-				GetState();
-		});
-	});
-}
-function load(e,t,n){if("js"==t){var a=document.createElement("script");a.src=e,a.type="text/javascript",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)}else if("css"==t){var a=document.createElement("link");a.href=e,a.rel="stylesheet",a.type="text/css",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)}}
-
-
+window.onload = function () {
+	load("style.css","css", function() {
+		load("microajax.js","js", function() {
+			GetState();
+		  });
+	  });
+  }
+function load(e,t,n){
+  if("js"==t){
+      var a=document.createElement("script");
+      a.src=e,a.type="text/javascript",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)
+      }
+   else if("css"==t){
+    var a=document.createElement("link");
+    a.href=e,a.rel="stylesheet",a.type="text/css",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)
+    }
+  }
 
 </script>
+</BODY>
+</HTML>
+
 )=====" ;
 
 
-//
-// FILL WITH INFOMATION
-// 
-
-void send_information_values_html ()
-{
-
+void send_information_values_html () {
+  debug("","/admin/infovalues"); 
 	String values ="";
-
 	values += "x_ssid|" + (String)WiFi.SSID() +  "|div\n";
 	values += "x_ip|" +  (String) WiFi.localIP()[0] + "." +  (String) WiFi.localIP()[1] + "." +  (String) WiFi.localIP()[2] + "." + (String) WiFi.localIP()[3] +  "|div\n";
 	values += "x_gateway|" +  (String) WiFi.gatewayIP()[0] + "." +  (String) WiFi.gatewayIP()[1] + "." +  (String) WiFi.gatewayIP()[2] + "." + (String) WiFi.gatewayIP()[3] +  "|div\n";
@@ -62,9 +66,8 @@ void send_information_values_html ()
 	values += "x_mac|" + GetMacAddress() +  "|div\n";
 	values += "x_ntp|" +  (String) DateTime.hour + ":" + (String) + DateTime.minute +  ":"  + (String)  DateTime.second + " " + (String)   DateTime.year + "-" + (String)  DateTime.month + "-" + (String)  DateTime.day +  "|div\n";
 	server.send ( 200, "text/plain", values);
-	debugln("",__FUNCTION__); 
-
-}
+  debugln("","."); 
+  }
 
 
 #endif

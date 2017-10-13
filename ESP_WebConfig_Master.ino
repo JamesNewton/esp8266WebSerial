@@ -79,11 +79,13 @@ DB9
 #define CLEAR_BLINK 2
 #define TX2 15
 #define RX2 13
+#define RTS_OUT 14 //not used. May become cable disconnect detect?
 
-#define BAUD_RATE 9600
-//38400
+//#define BAUD_RATE 9600
+#define BAUD_RATE 38400
 
-#define AdminTimeOut 600
+#define AdminTimeOut 0
+//600
 // Defines the Time in Seconds, when the Admin-Mode will be diabled
 //set to 0 to never disable
 
@@ -128,7 +130,7 @@ Include the HTML, STYLE and Script "Pages"
 #define STREAM_BUF_LINES 5
 #define STREAM_MAX_CONFIDENCE 10
 
-
+//extern "C" int __get_rf_mode(void); causes "unknown function error"
 #define MICROSECONDS 1000000
 
 /****** Global Variables *****/
@@ -136,13 +138,13 @@ Include the HTML, STYLE and Script "Pages"
 //these variables can change constantly and will not wear out the eeprom.
 struct {
   float count;
-  int other;
+  bool RFon;
 } rtcmem;
 static_assert (sizeof(rtcmem) < 512, "RTC can't hold more than 512 bytes");
 rst_info *reset;
 
 String DeviceID = "????????"; //compressed unique id for logging to server. 
-//made from MAC ID Base64 Encoded with URL safe character set
+//Will be made from MAC ID Base64 Encoded with URL safe character set
 
 byte streaming=0;
 String streamURL = "";
@@ -151,10 +153,10 @@ String streamBuf[STREAM_BUF_LINES];
 int streamBufLine = 0;
 
 boolean xoff=false; //flag to see if we need to hold off xmit until device is ready
+boolean havedata = false; //flag to indicate data in rxbuf so we don't have to check length each loop.
 String rxbuf = ""; //buffer for data recieved from device.
 #define RFBUF_MAX 128 
 
-long Interval = 0; //time ticks until we go back to sleep
 
 //If Xoff, recieve bytes until Xon before sending byte.
 void putc_x(byte b) {
@@ -166,6 +168,7 @@ void putc_x(byte b) {
     else if (c > 0 && c < 0xFF) { //rx data
       rxbuf += c; //buffer it
       //TODO: may need to check rxbuf.length() and send an xoff if too big.
+      havedata=true;
       }
     delay(1); //should this be more?
     //TODO: timeout?
@@ -182,11 +185,11 @@ void writeStr_x(String msg) {
   }
 
 boolean checkSerial(byte timout) {
-  while (Serial.available()) {
+  while (Serial.available()) { //note there is no timeout delay if there is no serial data waiting
     char c = Serial.read();  //gets one byte from serial buffer
     if (c == 0x13) { xoff=true; } // XOFF
     else if (c == 0x11) { xoff=false; } // XON
-    else if (c>0 && c<0xFF) { rxbuf += c; } //filter out nulls and FF's.
+    else if (c>0 && c<0xFF) { rxbuf += c; havedata=true;} //filter out nulls and FF's.
     if (!Serial.available() && timout) { delay(timout); } //wait a tich if there isn't already more data available. Otherwise, timeout.
     }
   }
@@ -205,23 +208,61 @@ void setup ( void ) {
   pinMode(WAS_BLINK, INPUT);
   digitalWrite(CLEAR_BLINK, HIGH);
   pinMode(CLEAR_BLINK, OUTPUT);
-  debugln("","Starting ES8266");
+  debug("\r","Starting ES8266");
 
   reset = ESP.getResetInfoPtr();
   switch (reset->reason) {
     case REASON_EXT_SYS_RST: //6
     case REASON_DEFAULT_RST: //0
     //standard power up or reset
+      rtcmem.count=0;
+      rtcmem.RFon=true; //TODO: Is this right? Will the radio always come on by default?
+      debugln(" ","from poweroff");
       break;
     case REASON_DEEP_SLEEP_AWAKE: // 5
     //wake up from RTC
       ESP.rtcUserMemoryRead(0, (uint32_t*) &rtcmem, sizeof(rtcmem));
-      debug("RTC Tick ",rtcmem.count);
+      rtcmem.count++;
+      debugln(" for RTC Tick ",rtcmem.count);
       break;
     }
 	EEPROM.begin(512); //EEPROM actually uses SPI_FLASH_SEC_SIZE which appears to be 4096
 
-//temp uncomment the next line if you need the mac address for your router.
+  ReadConfig(); //returns false and sets up default config if none found. See global.h
+  //config.Interval = 0; //Temporary: Use to break out of sleep loop.
+  config.ssid = "none";
+  if (config.Interval > 0) config.sleepy=true; else config.sleepy=false;
+  if (rtcmem.count >= config.WakeCount) {
+    havedata = true; //fake having data so we will connect. 
+    debugln("Check in",config.WakeCount);
+    }
+// Check if we really need to wake up, and if we don't, just go back to sleep
+  if ( !digitalRead(WAS_BLINK)   //havent see a blink
+    && config.Logging //and we are logging, but
+    && config.sleepy  //we are setup to go to sleep //config.Interval>0 causes webserver issues here
+    && !havedata      //not waiting on data to be logged to the server //rxbuf.length()==0 causes webserver issues here
+    ) {               //then lets go to sleep
+    debugln("Sleep for ",config.Interval);
+    rtcmem.RFon = false;
+    ESP.rtcUserMemoryWrite(0, (uint32_t*) &rtcmem, sizeof(rtcmem)); //write data to RTC memory so we don't loose it.
+    ESP.deepSleep(config.Interval * MICROSECONDS, WAKE_RF_DISABLED);
+    //WAKE_NO_RFCAL); //deep sleep, shut off RF, wake back up in setup.
+    //https://github.com/esp8266/Arduino/issues/3072
+    }
+//If we get to here, we want to wake up and talk, but the radio might not be on. Only way to turn it on is to set a flag and go back to sleep.
+  if (!rtcmem.RFon) {
+    debugln("Reset for RF","");
+    rtcmem.RFon = true;
+    ESP.rtcUserMemoryWrite(0, (uint32_t*) &rtcmem, sizeof(rtcmem)); //write data to RTC memory so we don't loose it.
+    ESP.deepSleep(1, WAKE_NO_RFCAL); //deep sleep, wake right away with RF on, assume calibration not needed
+    }
+
+  if (config.Connect) {
+    digitalWrite(SERIAL_ENABLE_PIN, HIGH);
+    debugln("Serial port enabled","");
+    }
+
+//uncomment the next line if you need the mac address for your router.
   debugln("MAC:",GetMacAddress());
 
   uint8_t mac[6];
@@ -231,10 +272,6 @@ void setup ( void ) {
   DeviceID.replace("/","_");
   debugln("DeviceID:",DeviceID);
 
-	ReadConfig(); //returns false and sets up default config if none found. See global.h
-  if (config.Connect) {
-    digitalWrite(SERIAL_ENABLE_PIN, HIGH);
-    }
 
 	if (AdminEnabled)	{
 		//WiFi.mode(WIFI_AP_STA);
@@ -248,7 +285,7 @@ void setup ( void ) {
 	else	{
 		WiFi.mode(WIFI_STA);
 	}
-
+ 
 	ConfigureWifi();
 //https://github.com/esp8266/Arduino/blob/master/doc/esp8266wifi/readme.md#enable-wi-fi-diagnostic
 	
@@ -283,7 +320,7 @@ void setup ( void ) {
 	server.on ( "/microajax.js", []() { 
 	  debugln("","microajax.js"); 
     server.sendHeader ( "Cache-Control", "max-age=86400" );  
-	  server.send ( 200, "text/plain", PAGE_microajax_js );  
+	  server.send ( 200, "text/plain", PAGE_microajax_js );  //in file Page_Scriptjs.h
 	  } );
 	server.on ( "/admin/values", send_network_configuration_values_html );
 	server.on ( "/admin/connectionstate", send_connection_state_values_html );
@@ -296,12 +333,13 @@ void setup ( void ) {
       writeStr_x(server.arg("text")); //pass on what was sent
       //TODO: Do we want a hard coded \n after the data or should the sender send that?
       Serial.flush(); //complete the send before going on
+      rxbuf=""; havedata=false; //done with that data.
       delay(10); //give the device time to respond
       checkSerial(10); // get any text that comes back now
       }
     server.send(200, "text/html", rxbuf); //should be text/plain but for testing... 
     debugln(">",rxbuf);
-    if (!config.Logging) rxbuf=""; //don't clear if logging so the server gets a copy
+    if (!config.Logging) {rxbuf=""; havedata=false;} //don't clear if logging so the server gets a copy
     });
   server.on("/file", [](){  
     if (server.hasArg("start")) { //have to specify a starting line to begin streaming.
@@ -347,7 +385,6 @@ void setup ( void ) {
 	server.begin();
 	debugln("HTTP server started on port:","80" );
 	tkSecond.attach(1,Second_Tick);
-  Interval = config.Interval; //How many time ticks until we go back to sleep
 	UDPNTPClient.begin(2390);  // Port for NTP receive
   } //Setup
 
@@ -366,7 +403,23 @@ void loop ( void ) {
    
 	if(DateTime.minute != Minute_Old)	{ //only check once a minute
 		Minute_Old = DateTime.minute;
-    if (WL_CONNECTED != WiFi.status()) { ConfigureWifi(); };
+     //Serial.printf("FreeMem:%d %d:%d:%d %d.%d.%d \n",ESP.getFreeHeap() , DateTime.hour,DateTime.minute, DateTime.second, DateTime.year, DateTime.month, DateTime.day);
+    debug("mem:",ESP.getFreeHeap());
+    debug(" ",DateTime.year);
+    debug("/",DateTime.month);
+    debug("/",DateTime.day);
+    debug(" ",DateTime.hour);
+    debug(":",DateTime.minute);
+    debug(":",DateTime.second);
+    if (AdminEnabled) {debug(" admin ","")};
+    if (config.Logging) {debug(" log ","")};
+    if (config.sleepy) {
+      debug(" sleep for:",config.Interval)
+      debug(" checkin every:",config.WakeCount)
+      };
+    if (havedata) {debug(" data:",rxbuf)};
+    debugln("","");
+//    if (WL_CONNECTED != WiFi.status()) { ConfigureWifi(); };
     if (config.Update_Time_Via_NTP_Every  > 0 ) {
       if (cNTP_Update > 5 && firstStart) {
         NTPRefresh();
@@ -379,6 +432,7 @@ void loop ( void ) {
         }
       }
     }
+
 
   if (streaming) {
     if (streamBufLine>0 && !xoff) {
@@ -407,6 +461,7 @@ void loop ( void ) {
           if (streaming < STREAM_MAX_CONFIDENCE) streaming++;
           debugln(">",rxbuf);
           rxbuf="";
+          havedata=false;
           }
         else { //TODO: Stop instantly on 404.
           debug(http.errorToString(httpCode),httpCode);
@@ -418,13 +473,12 @@ void loop ( void ) {
       }      
     }
     
-	server.handleClient();
-
   checkSerial(1); 
   // if we aren't connected to a browser, rxbuf will overflow
   // TODO: try to log rxbuf to a server
   // HACK: For now, just dump 
-  if ( ( config.Logging && ( rxbuf.length()>0 || digitalRead(WAS_BLINK) ) )
+  
+  if ( ( config.Logging && ( havedata || digitalRead(WAS_BLINK) ) )
   //TODO: OR... every so many wakeups.
   ) {
     streamURL = config.streamServerURL;// + server.arg("name");
@@ -437,16 +491,25 @@ void loop ( void ) {
         //TODO: Server response can set sleep interval and send data to device.
         rxbuf=http.getString();
         debugln("logged. Response:",rxbuf);
-        //TODO: If we got a command to send to the device, initiate the connection 
+        //TODO: If we got a command to send to the device, initiate the connection
+        havedata = false; //assume 
         if ( rxbuf.length()>0 ) {
-          digitalWrite(SERIAL_ENABLE_PIN, HIGH);
-          delay(5); //give the RS232 transceiver / level converter time to respond
-          writeStr_x(rxbuf); //pass on the servers response
-          Serial.flush(); //complete the send before going on
-          delay(10); //give the device time to respond
-          checkSerial(10); // get any text that comes back now
+          havedata=true; //correct
+          rxbuf = parseServer(rxbuf); //get out any settings and make those changes, leaving just the text to send to the device.
+          debugln("send:",rxbuf);
+          if ( rxbuf.length()>0 ) {
+            digitalWrite(SERIAL_ENABLE_PIN, HIGH);
+            delay(5); //give the RS232 transceiver / level converter time to respond
+            writeStr_x(rxbuf); //pass on the servers response
+            Serial.flush(); //complete the send before going on
+            rxbuf=""; havedata=false; //done with that data.
+            delay(10); //give the device time to respond
+            checkSerial(10); // get any text that comes back now
+            }
           }
+        if (rtcmem.count >= config.WakeCount) {rtcmem.count = 0;} //reset checkin count.
         digitalWrite(CLEAR_BLINK, LOW); //disable any further blinks while we are awake.
+        //TODO: Don't we want to see additional blinks?
         }
       else { 
         debugln("Logging failed to ",streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf));
@@ -459,31 +522,28 @@ void loop ( void ) {
       }
     }
 
-	if (Refresh)  {
-		Refresh = false;
-		///debugln("Refreshing...");
-		 //Serial.printf("FreeMem:%d %d:%d:%d %d.%d.%d \n",ESP.getFreeHeap() , DateTime.hour,DateTime.minute, DateTime.second, DateTime.year, DateTime.month, DateTime.day);
-	  }
 
-  if(DateTime.second != Second_Old) { //only check once a second
-    //debugln("","\'");
-    Second_Old = DateTime.second;
-    
-    if (config.Interval > 0 //we are setup to go to sleep
-    && config.Logging       //and we are logging, but
-    && rxbuf.length()==0    //not waiting on data to be logged to the server
-    && !AdminEnabled        //not in admin mode
-      ) {                   //then lets go to sleep
-        debugln("SwitchOff","");
+	if (Refresh)  { //Refresh gets set once a second by Second_Tick() in global.h
+		Refresh = false; //service it here when we get a round toit.
+    if (!AdminEnabled   //not in admin mode
+      && config.Logging //and we are logging, but
+      && config.sleepy  //we are setup to go to sleep //config.Interval>0 causes webserver issues here
+      && !havedata      //not waiting on data to be logged to the server //rxbuf.length()==0 causes webserver issues here
+      ) {               //then lets go to sleep
+        debugln("Sleep for ",config.Interval);
         digitalWrite(CLEAR_BLINK, HIGH); //allow new blinks to be detected
         //TODO: Drop the connection to the device.
-//        ESP.rtcUserMemoryWrite(0, (uint32_t*) &rtcmem, sizeof(rtcmem)); //write data to RTC memory so we don't loose it.
+        ESP.rtcUserMemoryWrite(0, (uint32_t*) &rtcmem, sizeof(rtcmem)); //write data to RTC memory so we don't loose it.
         //TODO: Compensate for how long we have already been awake. e.g. (Interval - DateTime.Seconds)
-//        ESP.deepSleep(Interval * MICROSECONDS, WAKE_NO_RFCAL); //deep sleep, assume RF ok, wake back up in setup.
-        }
-
+        ESP.deepSleep(config.Interval * MICROSECONDS, WAKE_NO_RFCAL); //deep sleep, assume RF ok, wake back up in setup.
+      }
+//    else {
+//      debugln(config.sleepy?"1":"0",havedata?"1":"0");
+//      }
     }
-  
+
+  server.handleClient();
+
   } // main loop
 
 

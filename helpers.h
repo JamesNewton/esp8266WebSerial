@@ -25,8 +25,9 @@ void swapout() {
 #define debugln(dir,msg) swapin();Serial.print(dir);Serial.println(msg);swapout();
 #define debughex(msg) swapin();Serial.print(">");for(int i=0;i<msg.length();i++) {Serial.print(msg[i],HEX);Serial.print(" ");}; swapout();
 
-//#define debugln(msg) 
-//#define debug(msg) 
+//#define debugln(dir,msg) 
+//#define debug(dir,msg) 
+//#define debughex(msg)
 
 static const uint8_t monthDays[]={31,28,31,30,31,30,31,31,30,31,30,31}; 
 #define LEAP_YEAR(Y) ( ((1970+Y)>0) && !((1970+Y)%4) && ( ((1970+Y)%100) || !((1970+Y)%400) ) )
@@ -180,60 +181,45 @@ void ConvertUnixTimeStamp( unsigned long TimeStamp, struct strDateTime* DateTime
 
 
 	
-String GetMacAddress()
-{
+String GetMacAddress() {
 	uint8_t mac[6];
     char macStr[18] = {0};
 	WiFi.macAddress(mac);
     sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0],  mac[1], mac[2], mac[3], mac[4], mac[5]);
     return  String(macStr);
-}
+  }
 
 // convert a single hex digit character to its integer value (from https://code.google.com/p/avr-netino/)
-unsigned char h2int(char c)
-{
-    if (c >= '0' && c <='9'){
-        return((unsigned char)c - '0');
-    }
-    if (c >= 'a' && c <='f'){
-        return((unsigned char)c - 'a' + 10);
-    }
-    if (c >= 'A' && c <='F'){
-        return((unsigned char)c - 'A' + 10);
-    }
-    return(0);
-}
+unsigned char h2int(char c) {
+  if (c >= '0' && c <='9') { return((unsigned char)c - '0');      }
+  if (c >= 'a' && c <='f') { return((unsigned char)c - 'a' + 10); }
+  if (c >= 'A' && c <='F') { return((unsigned char)c - 'A' + 10); }
+  return(0);
+  }
 
-String urldecode(String input) // (based on https://code.google.com/p/avr-netino/)
-{
-	 char c;
-	 String ret = "";
-	 
-	 for(byte t=0;t<input.length();t++)
-	 {
-		 c = input[t];
-		 if (c == '+') c = ' ';
-         if (c == '%') {
-
-
-         t++;
-         c = input[t];
-         t++;
-         c = (h2int(c) << 4) | h2int(input[t]);
-		 }
-		
-		 ret.concat(c);
-	 }
-	 return ret;
-  
-}
+String urldecode(String input) {// (based on https://code.google.com/p/avr-netino/)
+char c;
+String ret = "";
+  for(byte t=0;t<input.length();t++) {
+	  c = input[t];
+    if (c == '+') c = ' ';
+    if (c == '%') {
+      t++;
+      c = input[t];
+      t++;
+      c = (h2int(c) << 4) | h2int(input[t]);
+      }
+    ret.concat(c);
+    }
+	return ret;
+  }
 
 String urlencode(String str) {
-  String encodedString="";
-  char c;
-  char code0;
-  char code1;
-  char code2;
+String encodedString="";
+char c;
+char code0;
+char code1;
+char code2;
   for (int i =0; i < str.length(); i++){
     c=str.charAt(i);
     if (c == ' '){

@@ -12,7 +12,6 @@ int cNTP_Update = 0;											// Counter for Updating the time via NTP
 Ticker tkSecond;												// Second - Timer for Updating Datetime Structure
 boolean AdminEnabled = true;		// Enable Admin Mode for a given Time
 byte Minute_Old = 100;				// Helpvariable for checking, when a new Minute comes up (for Auto Turn On / Off)
-byte Second_Old = 100;
 HTTPClient http;
 //http.setReuse(true); //if server allows it
 
@@ -35,14 +34,15 @@ struct strConfig {
 
 //  boolean AutoTurnOn;
   boolean Logging;
-  boolean AutoTurnOff;
+//  boolean AutoTurnOff;
+  byte WakeCount;
   //byte TurnOnHour;
   boolean Connect;
   //byte TurnOnMinute;
   //byte TurnOffHour;
   //byte TurnOffMinute;
-  long Interval;
-
+  long Interval; //time to stay asleep
+  boolean sleepy; //flag to set if Interval > 0. NOT actually saved!
 
   String DeviceName;
   String streamServerURL;
@@ -89,15 +89,16 @@ void WriteConfig() {
   WriteStringToEEPROM(96, config.password);
   WriteStringToEEPROM(128, config.ntpServerName);
 
-  //EEPROM.write(300, config.AutoTurnOn);
   EEPROM.write(300, config.Logging);
-  EEPROM.write(301, config.AutoTurnOff);
-  //EEPROM.write(302, config.TurnOnHour);
+  //EEPROM.write(300, config.AutoTurnOn);
+  EEPROM.write(301, config.WakeCount);
+  //EEPROM.write(301, config.AutoTurnOff);
   EEPROM.write(302, config.Connect);
+  //EEPROM.write(302, config.TurnOnHour);
+  EEPROMWritelong(303, config.Interval); // 4 Bytes
   //EEPROM.write(303, config.TurnOnMinute);
   //EEPROM.write(304, config.TurnOffHour);
   //EEPROM.write(305, config.TurnOffMinute);
-  EEPROMWritelong(303, config.Interval); // 4 Bytes
   
   WriteStringToEEPROM(307, config.DeviceName);
   WriteStringToEEPROM(338, config.streamServerURL);
@@ -141,13 +142,14 @@ boolean ReadConfig() {
 
     //config.AutoTurnOn = EEPROM.read(300);
     config.Logging = EEPROM.read(300);
-    config.AutoTurnOff = EEPROM.read(301);
-    //config.TurnOnHour = EEPROM.read(302);
+    config.WakeCount = EEPROM.read(301);
+    //config.AutoTurnOff = EEPROM.read(301);
     config.Connect = EEPROM.read(302);
+    //config.TurnOnHour = EEPROM.read(302);
+    config.Interval = EEPROMReadlong(303); // 4 Bytes
     //config.TurnOnMinute = EEPROM.read(303);
     //config.TurnOffHour = EEPROM.read(304);
     //config.TurnOffMinute = EEPROM.read(305);
-    config.Interval = EEPROMReadlong(303); // 4 Bytes
     config.DeviceName = ReadStringFromEEPROM(307);
     config.streamServerURL = ReadStringFromEEPROM(338);
     return true;
@@ -166,15 +168,16 @@ boolean ReadConfig() {
     config.daylight = true;
     config.DeviceName = "Not Named";
     //config.AutoTurnOn = false;
-    config.Logging = true;
-    config.AutoTurnOff = false;
+    config.Logging = false;
+    config.WakeCount = 10;
+    //config.AutoTurnOff = false;
     //config.TurnOnHour = 0;
     config.Connect = true;
+    config.Interval = 0; //zero means stay on.
     //config.TurnOnMinute = 0;
     //config.TurnOffHour = 0;
     //config.TurnOffMinute = 0;
-    config.Interval = 0; //zero means stay on.
-    config.streamServerURL = "http://www.massmind.org/techref/getline.asp?t=esp";
+    config.streamServerURL = "http://www.massmind.org/techref/getline.asp?";
     WriteConfig();
     debug("","General config applied");
     return false;
@@ -287,6 +290,40 @@ void Second_Tick() {
   }
   Refresh = true;
 }
+
+String parseServer(String response) { //get out any settings and make those changes, leaving just the text to send to the device.
+char c;
+int p1,p2=0;
+String text;
+  for (int i =0; i < response.length(); i++){
+    c=response.charAt(i);
+    switch(c) {
+      case '\\':
+        i++; //don't look at escaped characters
+        loop;
+      case '{':
+        text = response.substring(1,i);
+        p1 = i+1; //start of first parameter
+        break;
+      case ':':
+        p2 = i; //end of paramter, start of value
+        debug(" param:",response.substring(p1,p2));
+        break;
+      case ',':
+      case '}':
+        debug(", val:",response.substring(p2+1,i));
+        if ( response.substring(p1,p2) == "interval" ) {
+          config.Interval = response.substring(p2+1,i).toInt();
+          if (config.Interval>0) config.sleepy=true; else config.sleepy=false;
+          debugln(" interval=",config.Interval);
+          }
+        p1 = i+1; //start of next parameter if it was ','
+        break;
+      }
+    }
+  if (0==p1) {text = response;} //if no JASON, entire string is text for device.
+  return text;
+  }
 
 #endif
 

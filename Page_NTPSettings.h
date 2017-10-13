@@ -1,9 +1,14 @@
-
-
+#ifndef PAGE_NTP_H
+#define PAGE_NTP_H
 
 const char PAGE_NTPConfiguration[] PROGMEM = R"=====(
+<!DOCTYPE html>
+<HTML>
+<HEAD>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+</HEAD>
+<BODY>
 <a href="admin.html"  class="btn btn--s">&lt;</a>&nbsp;&nbsp;<strong>NTP Settings</strong>
 <hr>
 <form action="" method="get">
@@ -49,36 +54,39 @@ const char PAGE_NTPConfiguration[] PROGMEM = R"=====(
 </select>
 </td></tr>
 <tr><td align="right">Daylight saving:</td><td><input type="checkbox" id="dst" name="dst"></td></tr>
-<tr><td colspan="2" align="center"><input type="submit" style="width:150px" class="btn btn--m btn--blue" value="Save"></td></tr>
+<tr><td colspan="2" align="center"><input disabled id="save" type="submit" style="width:150px" class="btn btn--m btn--blue" value="Save"></td></tr>
 </table>
 </form>
+
 <script>
-	
 
-window.onload = function ()
-{
-	load("style.css","css", function() 
-	{
-		load("microajax.js","js", function() 
-		{
-				setValues("/admin/ntpvalues");
-		});
-	});
-}
-function load(e,t,n){if("js"==t){var a=document.createElement("script");a.src=e,a.type="text/javascript",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)}else if("css"==t){var a=document.createElement("link");a.href=e,a.rel="stylesheet",a.type="text/css",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)}}
-
-
+window.onload = function () {
+  load("style.css","css", function() {
+    load("microajax.js","js", function() {
+      setValues("/admin/ntpvalues");
+      document.getElementById("save").disabled = false; 
+      });
+    });
+  }
+  
+function load(e,t,n){
+  if("js"==t){
+      var a=document.createElement("script");
+      a.src=e,a.type="text/javascript",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)
+      }
+   else if("css"==t){
+    var a=document.createElement("link");
+    a.href=e,a.rel="stylesheet",a.type="text/css",a.async=!1,a.onload=function(){n()},document.getElementsByTagName("head")[0].appendChild(a)
+    }
+  }
 
 </script>
+</BODY>
+</HTML>
 )=====";
 
-
-void send_NTP_configuration_html()
-{
-	
-	 
-	if (server.args() > 0 )  // Save Settings
-	{
+void send_NTP_configuration_html() {
+	if (server.args() > 0 ) { // Save Settings
 		config.daylight = false;
 		String temp = "";
 		for ( uint8_t i = 0; i < server.args(); i++ ) {
@@ -86,23 +94,15 @@ void send_NTP_configuration_html()
 			if (server.argName(i) == "update") config.Update_Time_Via_NTP_Every =  server.arg(i).toInt(); 
 			if (server.argName(i) == "tz") config.timezone =  server.arg(i).toInt(); 
 			if (server.argName(i) == "dst") config.daylight = true; 
-		}
+      }
 		WriteConfig();
 		firstStart = true;
-	}
+    }
 	server.send ( 200, "text/html", PAGE_NTPConfiguration ); 
 	debugln("",__FUNCTION__); 
-	
-}
+	}
 
-
-
-
-
-
-void send_NTP_configuration_values_html()
-{
-		
+void send_NTP_configuration_values_html(){		
 	String values ="";
 	values += "ntpserver|" + (String) config.ntpServerName + "|input\n";
 	values += "update|" +  (String) config.Update_Time_Via_NTP_Every + "|input\n";
@@ -110,5 +110,6 @@ void send_NTP_configuration_values_html()
 	values += "dst|" +  (String) (config.daylight ? "checked" : "") + "|chk\n";
 	server.send ( 200, "text/plain", values);
 	debugln("",__FUNCTION__); 
-	
-}
+	}
+
+#endif
