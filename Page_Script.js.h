@@ -50,7 +50,7 @@ function setValues(url) {
         document.getElementById(fields[0]).checked  = fields[1];
         }
       });
-    if (setValuesDone) setValuesDone();
+    if (typeof setValuesDone === 'function') setValuesDone();
     });
   }
 

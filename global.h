@@ -1,7 +1,9 @@
 #ifndef GLOBAL_H
 #define GLOBAL_H
 
-ESP8266WebServer server(80);									// The Webserver
+//ESP8266WebServer server(80);									// The Webserver
+AsyncWebServer server(80);
+
 boolean firstStart = true;										// On firststart = true, NTP will try to get a valid time
 int AdminTimeOutCounter = 0;									// Counter for Disabling the AdminMode
 strDateTime DateTime;											// Global DateTime structure, will be refreshed every Second
@@ -198,6 +200,8 @@ String get_wifi_status() {
 }
 
 void ConfigureWifi() {
+//https://github.com/esp8266/Arduino/blob/master/doc/esp8266wifi/readme.md#enable-wi-fi-diagnostic
+
   debugln("Begin Wifi to point:", config.ssid);
   //debugln("Password:",config.password);
   WiFi.begin (config.ssid.c_str(), config.password.c_str());

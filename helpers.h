@@ -1,13 +1,15 @@
 #ifndef HELPERS_H
 #define HELPERS_H
 
-//#define debugln(msg) Serial.print(">");Serial.println(msg);
-//#define debug(msg) Serial.print(">");Serial.print(msg);
+#define DEBUGGING
 
+#ifdef DEBUGGING
 void swapin() {
   Serial.flush();
-  delay(5);
+  delay(5);//can't be used with ESPAsyncWebServer
   Serial.swap();
+//  Serial.begin(DEBUG_BAUD_RATE);
+  Serial.flush();
   //when not used as serial, keep TX high or device will see nulls or FF's
   //pinMode(TX2, OUTPUT);
   //digitalWrite(TX2, HIGH); 
@@ -17,17 +19,24 @@ void swapin() {
 
 void swapout() {
   Serial.flush();
-  delay(5);
+  delay(5);//can't be used with ESPAsyncWebServer
   Serial.swap();
+//  Serial.begin(BAUD_RATE);
+  Serial.flush();
   }
 
 #define debug(dir,msg) swapin();Serial.print(dir);Serial.print(msg);swapout();
 #define debugln(dir,msg) swapin();Serial.print(dir);Serial.println(msg);swapout();
-#define debughex(msg) swapin();Serial.print(">");for(int i=0;i<msg.length();i++) {Serial.print(msg[i],HEX);Serial.print(" ");}; swapout();
+//adding Serial.print(0); seems to compensate for the loss of the last crlf when using ESPAsyncWebServer
+#define debughex(msg) swapin();Serial.print(">");for(int i=0;i<msg.length();i++) {Serial.print(msg[i],HEX);Serial.print(' ');}; swapout();
 
-//#define debugln(dir,msg) 
-//#define debug(dir,msg) 
-//#define debughex(msg)
+#else
+
+#define debugln(dir,msg) 
+#define debug(dir,msg) 
+#define debughex(msg)
+
+#endif
 
 static const uint8_t monthDays[]={31,28,31,30,31,30,31,31,30,31,30,31}; 
 #define LEAP_YEAR(Y) ( ((1970+Y)>0) && !((1970+Y)%4) && ( ((1970+Y)%100) || !((1970+Y)%400) ) )

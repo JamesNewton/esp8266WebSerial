@@ -1,3 +1,5 @@
+
+
 /* 
   ESP_WebConfig 
   http://www.john-lassen.de/index.php/projects/esp-8266-arduino-ide-webconfig
@@ -22,8 +24,8 @@ page, and the styles, and the js, and the icon, and the values is just too much.
 It wouldn't be so bad if we could enable casheing of the pages, but that requires a nasty conversion of the time for 
 the Last-Modified header value. Actually... maybe it doesn't... it would appear that a fixed, fake, Last-Modified with
 a fixed Cache-Control: max-age=### works ok. At least in Chrome.
-    server.sendHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  
-    server.sendHeader ( "Cache-Control", "max-age=86400" );  
+    response->addHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  
+    response->addHeader ( "Cache-Control", "max-age=86400" );  
 Actually, the Last-Modified doesn't seem to be needed... Chrome gets by fine with just max-age. Good enough for now.
 
 Putting each page all in one string would be more reliable, but wastes gobs of memory. 
@@ -33,7 +35,7 @@ http://callmenick.com/post/simple-responsive-tabs-javascript-css
 that still leaves us with an ajax request for all the data.
   
 Building up a single page from multiple constant strings wastes ram and sending page parts is more complex with 
-the server.send code because the total content length must be known. But perhaps we can do chunked content? By 
+the request->send code because the total content length must be known. But perhaps we can do chunked content? By 
 using CONTENT_LENGTH_UNKNOWN and then multiple calls to server.sendContent ala:
 http://www.esp8266.com/viewtopic.php?p=34858&sid=e4749ea6b5cca73257f7829adb682f09#p34858
 https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266WebServer/examples/SDWebServer
@@ -82,7 +84,8 @@ DB9
 #define RTS_OUT 14 //not used. May become cable disconnect detect?
 
 //#define BAUD_RATE 9600
-#define BAUD_RATE 38400
+#define DEBUG_BAUD_RATE 38400
+#define BAUD_RATE 9600
 
 #define AdminTimeOut 0
 //600
@@ -101,8 +104,12 @@ defines a valid SSID as 0-32 octets with arbitrary contents.
 
 #include <ESP8266WiFi.h>
 //#include <WiFiClient.h>
+//#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 #include <ESP8266HTTPClient.h>
-#include <ESP8266WebServer.h>
+
 #include <Ticker.h>
 #include <EEPROM.h>
 #include <WiFiUdp.h>
@@ -117,14 +124,13 @@ extern "C" {
 /*
 Include the HTML, STYLE and Script "Pages"
 */
+
+String debugbuf = "";
+
 #include "Page_Root.h"
-#include "Page_Admin.h"
-#include "Page_Script.js.h"
+#include "Pages.h"
 #include "Page_Style.css.h"
-#include "Page_NTPsettings.h"
-#include "Page_Information.h"
-#include "Page_General.h"
-#include "PAGE_NetworkConfiguration.h"
+#include "Page_Script.js.h"
 #include "example.h"
 
 #define STREAM_BUF_LINES 5
@@ -134,6 +140,7 @@ Include the HTML, STYLE and Script "Pages"
 #define MICROSECONDS 1000000
 
 /****** Global Variables *****/
+
 //anything defined inside this struct will be saved to RTC memory on DeepSleep and should survive the restart
 //these variables can change constantly and will not wear out the eeprom.
 struct {
@@ -156,7 +163,6 @@ boolean xoff=false; //flag to see if we need to hold off xmit until device is re
 boolean havedata = false; //flag to indicate data in rxbuf so we don't have to check length each loop.
 String rxbuf = ""; //buffer for data recieved from device.
 #define RFBUF_MAX 128 
-
 
 //If Xoff, recieve bytes until Xon before sending byte.
 void putc_x(byte b) {
@@ -208,16 +214,16 @@ void setup ( void ) {
   pinMode(WAS_BLINK, INPUT);
   digitalWrite(CLEAR_BLINK, HIGH);
   pinMode(CLEAR_BLINK, OUTPUT);
-  debug("\r","Starting ES8266");
+  debugln("\r","Start ES8266 reason:");
 
   reset = ESP.getResetInfoPtr();
+  debug(reset->reason,ESP.getResetReason());
   switch (reset->reason) {
     case REASON_EXT_SYS_RST: //6
     case REASON_DEFAULT_RST: //0
     //standard power up or reset
       rtcmem.count=0;
       rtcmem.RFon=true; //TODO: Is this right? Will the radio always come on by default?
-      debugln(" ","from poweroff");
       break;
     case REASON_DEEP_SLEEP_AWAKE: // 5
     //wake up from RTC
@@ -229,8 +235,8 @@ void setup ( void ) {
 	EEPROM.begin(512); //EEPROM actually uses SPI_FLASH_SEC_SIZE which appears to be 4096
 
   ReadConfig(); //returns false and sets up default config if none found. See global.h
-  //config.Interval = 0; //Temporary: Use to break out of sleep loop.
-  config.ssid = "none";
+  config.Interval = 0; //Temporary: Use to break out of sleep loop.
+  
   if (config.Interval > 0) config.sleepy=true; else config.sleepy=false;
   if (rtcmem.count >= config.WakeCount) {
     havedata = true; //fake having data so we will connect. 
@@ -287,101 +293,127 @@ void setup ( void ) {
 	}
  
 	ConfigureWifi();
-//https://github.com/esp8266/Arduino/blob/master/doc/esp8266wifi/readme.md#enable-wi-fi-diagnostic
 	
+  server.on ( "/", HTTP_GET, handle_root  ); //main web page in Page_Root.h
+	server.on ( "/admin.html", HTTP_GET, [](AsyncWebServerRequest *request) { //settings menu
+#ifdef DEBUGGING
+	  debugbuf += "admin.html";
+#endif
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", PAGE_AdminMainPage); //in Page_Root.h
+    response->addHeader ( "Cache-Control", "max-age=86400" );  //doesn't change, let the browser know
+    //response->addHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  //doesn't appear to work
+	  request->send ( response );   
+	  }  );
+  server.on ( "/general.html", HTTP_GET, send_general_html  ); //in Pages.h
+  server.on ( "/general.html", HTTP_POST, send_general_html  ); //ESPAsyncWebServer needs separate GET and POST handlers
+  server.on ( "/config.html", HTTP_GET, send_network_configuration_html );
+  server.on ( "/config.html", HTTP_POST, send_network_configuration_html );
+	server.on ( "/info.html", HTTP_GET, [](AsyncWebServerRequest *request) { 
+#ifdef DEBUGGING
+    debugbuf += "/info.html"; 
+#endif
+	  request->send ( 200, "text/html", PAGE_Information );
+	  } );
+  server.on ( "/ntp.html", HTTP_GET, send_NTP_configuration_html  );
+  server.on ( "/ntp.html", HTTP_POST, send_NTP_configuration_html  );
 
-//  server.on ( "/", processExample  );
-//  server.on ( "/", sendRootPage  );
-  server.on ( "/", handle_root  );
-  
-	server.on ( "/admin/filldynamicdata", filldynamicdata );
-	
-	server.on ( "/favicon.ico",   []() {
-	  debugln("","favicon.ico"); 
-    server.sendHeader ( "Cache-Control", "max-age=86400" );  
-	  server.send ( 200, "text/html", "" );   //not actually sending a file? Why not 404?
-	  }  );
-	server.on ( "/admin.html", []() { 
-	  debugln("","admin.html"); 
-    server.sendHeader ( "Cache-Control", "max-age=86400" );  
-	  server.send ( 200, "text/html", PAGE_AdminMainPage );   
-	  }  );
-	server.on ( "/config.html", send_network_configuration_html );
-	server.on ( "/info.html", []() { debugln("","info.html"); server.send ( 200, "text/html", PAGE_Information );   }  );
-	server.on ( "/ntp.html", send_NTP_configuration_html  );
-	server.on ( "/general.html", send_general_html  );
-	server.on ( "/example.html", []() { server.send ( 200, "text/html", PAGE_example );  } );
-	server.on ( "/style.css", []() { 
-	  debugln("","style.css"); 
-    //server.sendHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  
-    server.sendHeader ( "Cache-Control", "max-age=86400" );  
-    server.send ( 200, "text/css", PAGE_Style_css );  
+	server.on ( "/example.html", HTTP_GET, [](AsyncWebServerRequest *request) { request->send ( 200, "text/html", PAGE_example );  } );
+  server.on ( "/admin/filldynamicdata", HTTP_GET, filldynamicdata );
+
+  server.on ( "/favicon.ico", HTTP_GET, send_favicon_ico ); //in Page_Root.h
+	server.on ( "/style.css", HTTP_GET, [](AsyncWebServerRequest *request) { 
+#ifdef DEBUGGING
+	  debugbuf += "/style.css"; 
+#endif
+    AsyncWebServerResponse *response = request->beginResponse( 200, "text/css", PAGE_Style_css );
+    response->addHeader ( "Cache-Control", "max-age=86400" );  
+    request->send ( response );   
 	  } );
-	server.on ( "/microajax.js", []() { 
-	  debugln("","microajax.js"); 
-    server.sendHeader ( "Cache-Control", "max-age=86400" );  
-	  server.send ( 200, "text/plain", PAGE_microajax_js );  //in file Page_Scriptjs.h
+	server.on ( "/microajax.js", HTTP_GET, [](AsyncWebServerRequest *request) { 
+#ifdef DEBUGGING
+	  debugbuf+="/microajax.js"; 
+#endif
+    AsyncWebServerResponse *response = request->beginResponse( 200, "text/plain", PAGE_microajax_js );
+    response->addHeader ( "Cache-Control", "max-age=86400" );  
+    request->send ( response );   
 	  } );
-	server.on ( "/admin/values", send_network_configuration_values_html );
-	server.on ( "/admin/connectionstate", send_connection_state_values_html );
-	server.on ( "/admin/infovalues", send_information_values_html );
-	server.on ( "/admin/ntpvalues", send_NTP_configuration_values_html );
-	server.on ( "/admin/generalvalues", send_general_configuration_values_html);
-	server.on ( "/admin/devicename",     send_devicename_value_html);
-  server.on("/data", [](){  
-    if (server.hasArg("text")) {
-      writeStr_x(server.arg("text")); //pass on what was sent
-      //TODO: Do we want a hard coded \n after the data or should the sender send that?
+	server.on ( "/admin/values", HTTP_GET, send_network_configuration_values_html );
+	server.on ( "/admin/connectionstate", HTTP_GET, send_connection_state_values_html );
+	server.on ( "/admin/infovalues", HTTP_GET, send_information_values_html );
+	server.on ( "/admin/ntpvalues", HTTP_GET, send_NTP_configuration_values_html );
+	server.on ( "/admin/generalvalues", HTTP_GET, send_general_configuration_values_html);
+	server.on ( "/admin/devicename", HTTP_GET, send_devicename_value_html);
+  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){  
+    if (request->hasArg("text")) {
+      writeStr_x(request->arg("text")); //pass on what was sent
       Serial.flush(); //complete the send before going on
       rxbuf=""; havedata=false; //done with that data.
-      delay(10); //give the device time to respond
-      checkSerial(10); // get any text that comes back now
+      //delay(10); //give the device time to respond //nope, can't 'cause AsyncWebServer, get it next browser request
+      checkSerial(0); // get any text that comes back now //parameter is delay, must be 0 with AsyncWebServer
       }
-    server.send(200, "text/html", rxbuf); //should be text/plain but for testing... 
-    debugln(">",rxbuf);
+    request->send(200, "text/html", rxbuf); //should be text/plain but for testing... 
+#ifdef DEBUGGING
+    if (rxbuf.length()>0) debugbuf+=">"+rxbuf;
+#endif
     if (!config.Logging) {rxbuf=""; havedata=false;} //don't clear if logging so the server gets a copy
     });
-  server.on("/file", [](){  
-    if (server.hasArg("start")) { //have to specify a starting line to begin streaming.
+  server.on("/file", HTTP_GET, [](AsyncWebServerRequest *request){  
+    if (request->hasArg("start")) { //have to specify a starting line to begin streaming.
       if (WL_CONNECTED != WiFi.status()) {
-        debugln("file requested, but no net",get_wifi_status());
-        server.send(400, "text/html", "No internet access, check network config"); 
+#ifdef DEBUGGING
+        debugbuf+="file requested, but no net\n";
+        debugbuf+=get_wifi_status();
+#endif
+        request->send(400, "text/html", "No internet access, check network config"); 
         }
       else { //connected, start new file
-        streamLine = server.arg("start").toInt(); // || 1; //the logical or 1 doesn't work for some reason!!!
+        streamLine = request->arg("start").toInt(); // || 1; //the logical or 1 doesn't work for some reason!!!
         if (streamLine < 1) streamLine = 1;
-        streamURL = config.streamServerURL + server.arg("name"); //include file name if specified
+        streamURL = config.streamServerURL + request->arg("name"); //include file name if specified
         http.begin(streamURL + "&line=" + streamLine);
-        debugln("Streaming from \n",streamURL + "&line=" + streamLine);
+#ifdef DEBUGGING
+        debugbuf+="Streaming from \n";
+        debugbuf+=streamURL;
+        debugbuf+="&line=";
+        debugbuf+=streamLine;
+        debugbuf+="\n";
+#endif
         //TODO: Make the argument name for the line number configurable
         //maybe it should be post data?
         int httpCode = http.GET();
         if (HTTP_CODE_OK==httpCode) {
           if (streaming < STREAM_MAX_CONFIDENCE) streaming++; //flag it so the loop will keep running
           streamBuf[streamBufLine] = http.getString(); //first line returned on open
-          server.send(200, "text/html", (String)"Streaming:"+streamBuf[streamBufLine]+"<a href=\"/file?stop=\">Stop</a> <a href=\"/file\">Status</a>"); 
+          request->send(200, "text/html", (String)"Streaming:"+streamBuf[streamBufLine]+"<a href=\"/file?stop=\">Stop</a> <a href=\"/file\">Status</a>"); 
           streamBufLine++;
           streamLine++;
           }
         else {
-          server.send(400, "text/html", http.errorToString(httpCode)+"\nBad response from file stream server, check network config."); 
+          request->send(400, "text/html", http.errorToString(httpCode)+"\nBad response from file stream server, check network config."); 
           }
         http.end();
         }
       } //done with new stream
-    else if (server.hasArg("stop")) { 
+    else if (request->hasArg("stop")) { 
       streaming = 0;  //stop the cha loop a
-      server.send(200, "text/html", (String)"Streaming halted at line:" + streamLine + " <a href=\"/file?start=" + streamLine + "\">Continue</a>"); 
+      request->send(200, "text/html", (String)"Streaming halted at line:" + streamLine + " <a href=\"/file?start=" + streamLine + "\">Continue</a>"); 
       }
     else { //got a request but no start
       if (streaming) { //already streaming, just provide a status update.
-        server.sendHeader ( "Refresh", "5" );  
-        // short version of <META HTTP-EQUIV="Refresh" CONTENT="600">
-        server.send(200, "text/html", (String)"Streaming:" + streamLine + +"\n<br><a href=\"/file?stop=\">Stop</a>"); 
+        AsyncWebServerResponse *response = request->beginResponse(200, "text/html", (String)"Streaming:" + streamLine + +"\n<br><a href=\"/file?stop=\">Stop</a>");
+        response->addHeader ( "Refresh", "5" );  // short version of <META HTTP-EQUIV="Refresh" CONTENT="600">
+        request->send(response); 
         }
       }
     });
-	server.onNotFound ( []() { debugln("Page Not Found",""); server.send ( 404, "text/html", "Page not Found" );   }  );
+	server.onNotFound ( [](AsyncWebServerRequest *request) { 
+#ifdef DEBUGGING
+	  debugbuf+="404:";
+	  debugbuf+=request->url(); 
+    debugbuf+="\n";
+#endif
+	  request->send ( 404, "text/html", "Page not Found" );
+	  }  );
 	server.begin();
 	debugln("HTTP server started on port:","80" );
 	tkSecond.attach(1,Second_Tick);
@@ -403,6 +435,7 @@ void loop ( void ) {
    
 	if(DateTime.minute != Minute_Old)	{ //only check once a minute
 		Minute_Old = DateTime.minute;
+#ifdef DEBUGGING
      //Serial.printf("FreeMem:%d %d:%d:%d %d.%d.%d \n",ESP.getFreeHeap() , DateTime.hour,DateTime.minute, DateTime.second, DateTime.year, DateTime.month, DateTime.day);
     debug("mem:",ESP.getFreeHeap());
     debug(" ",DateTime.year);
@@ -419,6 +452,7 @@ void loop ( void ) {
       };
     if (havedata) {debug(" data:",rxbuf)};
     debugln("","");
+#endif
 //    if (WL_CONNECTED != WiFi.status()) { ConfigureWifi(); };
     if (config.Update_Time_Via_NTP_Every  > 0 ) {
       if (cNTP_Update > 5 && firstStart) {
@@ -433,7 +467,6 @@ void loop ( void ) {
       }
     }
 
-
   if (streaming) {
     if (streamBufLine>0 && !xoff) {
       streamBufLine--;
@@ -446,7 +479,7 @@ void loop ( void ) {
         streaming = 0; //stop the cha loop a
         }
       else {
-        streamURL = config.streamServerURL + server.arg("name");
+        //streamURL = config.streamServerURL + server.arg("name"); //already set in server.on("/file"
         //http.begin(streamURL + "&line=" + streamLine + "&lines=" + (STREAM_BUF_LINES-streamBufLine));
         //TODO: Deal with multiple line returns.
         http.begin(streamURL + "&line=" + streamLine + "&data=" + rxbuf );
@@ -477,11 +510,12 @@ void loop ( void ) {
   // if we aren't connected to a browser, rxbuf will overflow
   // TODO: try to log rxbuf to a server
   // HACK: For now, just dump 
-  
+
+
   if ( ( config.Logging && ( havedata || digitalRead(WAS_BLINK) ) )
-  //TODO: OR... every so many wakeups.
+  //http://www.massmind.org/techref/getline.asp?id=GP40noFt&line=200&lines=1000
   ) {
-    streamURL = config.streamServerURL;// + server.arg("name");
+    streamURL = config.streamServerURL;
     if (!http.begin(streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf) + "&blink=" + (String) (digitalRead(WAS_BLINK)? "YES": "NO") ) ) {
       debug("Failed to open ",streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf));
       }
@@ -489,8 +523,10 @@ void loop ( void ) {
       int httpCode = http.GET(); //blocking TODO: Timeout?
       if (HTTP_CODE_OK==httpCode) {
         //TODO: Server response can set sleep interval and send data to device.
+        debug("logged:",rxbuf);
+        if (digitalRead(WAS_BLINK)) debug("BLINK ","");
         rxbuf=http.getString();
-        debugln("logged. Response:",rxbuf);
+        debugln("Response:",rxbuf);
         //TODO: If we got a command to send to the device, initiate the connection
         havedata = false; //assume 
         if ( rxbuf.length()>0 ) {
@@ -540,9 +576,15 @@ void loop ( void ) {
 //    else {
 //      debugln(config.sleepy?"1":"0",havedata?"1":"0");
 //      }
+#ifdef DEBUGGING
+    if (debugbuf.length()>0) {
+      debugln(debugbuf,"");
+      debugbuf="";
+      }
+#endif
+
     }
 
-  server.handleClient();
 
   } // main loop
 
