@@ -205,19 +205,16 @@ void setup ( void ) {
   //digitalWrite(TX2, HIGH); //when not used as serial, keep TX high or device will see nulls or FF's
   //pinMode(RX2,INPUT_PULLUP); // when not used as serial, keep RX high or we may see nulls or FF's
   Serial.begin(BAUD_RATE);
-  //delay(500);
-  //Serial.println("Up");
-  //delay(500);
   Serial.swap(); //change to TX GPIO15, RX GPIO13 
   pinMode(SERIAL_ENABLE_PIN, OUTPUT);
   digitalWrite(SERIAL_ENABLE_PIN, LOW);
   pinMode(WAS_BLINK, INPUT);
   digitalWrite(CLEAR_BLINK, HIGH);
   pinMode(CLEAR_BLINK, OUTPUT);
-  debugln("\r","Start ES8266 reason:");
+  debug("\r","Start ES8266 reason:");
 
   reset = ESP.getResetInfoPtr();
-  debug(reset->reason,ESP.getResetReason());
+  debugln(reset->reason,ESP.getResetReason());
   switch (reset->reason) {
     case REASON_EXT_SYS_RST: //6
     case REASON_DEFAULT_RST: //0
@@ -299,7 +296,11 @@ void setup ( void ) {
 #ifdef DEBUGGING
 	  debugbuf += "admin.html";
 #endif
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", PAGE_AdminMainPage); //in Page_Root.h
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", PAGE_AdminMainPage); //in Pages.h
+  // Sets Content-Length to 1 more than actual length.
+//    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", (const uint8_t *)PAGE_AdminMainPage, strlen(PAGE_AdminMainPage)); 
+    //no matching function for call to 'AsyncWebServerRequest::beginResponse(int, const char [10], const uint8_t*, size_t)'
+//    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", PAGE_AdminMainPage);
     response->addHeader ( "Cache-Control", "max-age=86400" );  //doesn't change, let the browser know
     //response->addHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  //doesn't appear to work
 	  request->send ( response );   
@@ -416,6 +417,7 @@ void setup ( void ) {
 	  }  );
 	server.begin();
 	debugln("HTTP server started on port:","80" );
+  debugln("Response Length:", strlen(PAGE_AdminMainPage));
 	tkSecond.attach(1,Second_Tick);
 	UDPNTPClient.begin(2390);  // Port for NTP receive
   } //Setup
