@@ -75,13 +75,16 @@ DB9
   First initial version to the public
   
   */
+#define DEBUGGING
+#define TFT_DISPLAY
 
 #define SERIAL_ENABLE_PIN 5
 #define WAS_BLINK 4
 #define CLEAR_BLINK 2
 #define TX2 15
 #define RX2 13
-#define RTS_OUT 14 //not used. May become cable disconnect detect?
+#define RTS_OUT 14 
+//not used. May become cable disconnect detect?
 
 //#define BAUD_RATE 9600
 #define DEBUG_BAUD_RATE 38400
@@ -114,6 +117,19 @@ defines a valid SSID as 0-32 octets with arbitrary contents.
 #include <EEPROM.h>
 #include <WiFiUdp.h>
 //#include "ESP_Sleep.h"
+
+#ifdef TFT_DISPLAY
+#include <TFT_eSPI.h> // Graphics and font library for ST7735 driver chip
+#include <SPI.h>
+/*
+https://github.com/Bodmer/TFT_eSPI Supports using the SPI0 bus:
+https://github.com/Bodmer/TFT_eSPI/issues/74
+https://www.adafruit.com/product/2088
+http://www.displayfuture.com/Display/datasheet/controller/ST7735.pdf
+https://learn.adafruit.com/adafruit-gfx-graphics-library?view=all
+ */
+#endif
+
 #include "base64.h"
 extern "C" {
 #include <user_interface.h> //Required for getResetInfoPtr()
@@ -125,7 +141,15 @@ extern "C" {
 Include the HTML, STYLE and Script "Pages"
 */
 
+#ifdef DEBUGGING
 String debugbuf = "";
+#ifdef TFT_DISPLAY
+int debug_y;
+int debug_x;
+#define TFT_DEBUG_START 22
+#define TFT_DEBUG_END TFT_HEIGHT-16
+#endif
+#endif
 
 #include "Page_Root.h"
 #include "Pages.h"
@@ -138,6 +162,7 @@ String debugbuf = "";
 
 //extern "C" int __get_rf_mode(void); causes "unknown function error"
 #define MICROSECONDS 1000000
+ADC_MODE(ADC_VCC);
 
 /****** Global Variables *****/
 
@@ -200,6 +225,25 @@ boolean checkSerial(byte timout) {
     }
   }
 
+#ifdef TFT_DISPLAY
+TFT_eSPI tft = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
+#define TFT_BACKGROUND TFT_BLUE
+#define TFT_RBG_COLOR(r,g,b) (((((r)/8)&31) << 11) | ((((g)/4)&63) << 5) | (((b)/8)&31))
+
+void showreading(String reading, int x, int y, int fontno) {
+  tft.setTextColor(TFT_YELLOW,TFT_BACKGROUND); 
+  tft.setTextFont(fontno); tft.setTextSize(1);
+  if (x<0) { 
+    x = -x - tft.textWidth(reading,fontno) - 2;
+    if (x<0) x = 0;
+    }
+  //tft.fillRect(x,y,TFT_WIDTH-x,tft.fontHeight(fontno),TFT_BACKGROUND);
+  tft.setCursor(x, y); 
+  tft.print(reading);
+  }
+  
+#endif
+
 void setup ( void ) {
   //pinMode(TX2, OUTPUT); //TX line to device should always be an output
   //digitalWrite(TX2, HIGH); //when not used as serial, keep TX high or device will see nulls or FF's
@@ -211,8 +255,9 @@ void setup ( void ) {
   pinMode(WAS_BLINK, INPUT);
   digitalWrite(CLEAR_BLINK, HIGH);
   pinMode(CLEAR_BLINK, OUTPUT);
-  debug("\r","Start ES8266 reason:");
 
+  debug("\r","Start ES8266 reason:");
+  
   reset = ESP.getResetInfoPtr();
   debugln(reset->reason,ESP.getResetReason());
   switch (reset->reason) {
@@ -259,6 +304,18 @@ void setup ( void ) {
     ESP.rtcUserMemoryWrite(0, (uint32_t*) &rtcmem, sizeof(rtcmem)); //write data to RTC memory so we don't loose it.
     ESP.deepSleep(1, WAKE_NO_RFCAL); //deep sleep, wake right away with RF on, assume calibration not needed
     }
+//we are up and radio should be on.
+
+#ifdef TFT_DISPLAY
+  tft.init();
+  tft.setRotation(1);
+  tft.fillScreen(TFT_BACKGROUND);
+  tft.setCursor(0, 0);
+  tft.setTextColor(TFT_WHITE,TFT_BACKGROUND); tft.setTextFont(1); tft.setTextSize(1);
+  #ifdef DEBUGGING
+  debug_x=1; debug_y=TFT_DEBUG_START;
+  #endif
+#endif
 
   if (config.Connect) {
     digitalWrite(SERIAL_ENABLE_PIN, HIGH);
@@ -267,13 +324,18 @@ void setup ( void ) {
 
 //uncomment the next line if you need the mac address for your router.
   debugln("MAC:",GetMacAddress());
-
   uint8_t mac[6];
   WiFi.macAddress(mac);
   DeviceID = base64::encode(mac,6);
   DeviceID.replace("+","-");
   DeviceID.replace("/","_");
   debugln("DeviceID:",DeviceID);
+#ifdef TFT_DISPLAY
+  tft.print("MAC:");
+  tft.println(GetMacAddress());
+  tft.print("Device:");
+  tft.print(DeviceID);
+#endif
 
 
 	if (AdminEnabled)	{
@@ -420,6 +482,10 @@ void setup ( void ) {
   debugln("Response Length:", strlen(PAGE_AdminMainPage));
 	tkSecond.attach(1,Second_Tick);
 	UDPNTPClient.begin(2390);  // Port for NTP receive
+#ifdef TFT_DISPLAY
+  tft.println(" up");
+#endif
+
   } //Setup
 
 
@@ -455,7 +521,28 @@ void loop ( void ) {
     if (havedata) {debug(" data:",rxbuf)};
     debugln("","");
 #endif
-//    if (WL_CONNECTED != WiFi.status()) { ConfigureWifi(); };
+#ifdef TFT_DISPLAY
+    tft.setCursor(0, 2);
+    if (WL_CONNECTED == WiFi.status()) { 
+      tft.setCursor(1, 2);//leave room for power status
+      tft.setTextColor(TFT_YELLOW,TFT_BACKGROUND); tft.setTextFont(2); tft.setTextSize(1);
+      IPAddress ip = WiFi.localIP();
+      tft.print(String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + ".");
+      tft.setTextFont(1); tft.setTextSize(2); 
+      tft.println(String(ip[3]));
+      }
+    else if (AdminEnabled) {
+      tft.setCursor(1, 2);//leave room for power status
+      tft.setTextColor(TFT_WHITE,TFT_BACKGROUND); tft.setTextFont(1); tft.setTextSize(1);
+      tft.print("MAC:");
+      tft.println(GetMacAddress());
+      tft.setTextColor(TFT_YELLOW,TFT_BACKGROUND); tft.setTextFont(1); tft.setTextSize(1);
+      tft.print("SSID:");
+      tft.println(ACCESS_POINT_NAME);
+      tft.print("PASS:");
+      tft.println(ACCESS_POINT_PASSWORD);
+      };
+#endif
     if (config.Update_Time_Via_NTP_Every  > 0 ) {
       if (cNTP_Update > 5 && firstStart) {
         NTPRefresh();
@@ -578,13 +665,30 @@ void loop ( void ) {
 //    else {
 //      debugln(config.sleepy?"1":"0",havedata?"1":"0");
 //      }
+
 #ifdef DEBUGGING
     if (debugbuf.length()>0) {
       debugln(debugbuf,"");
+  #ifdef TFT_DISPLAY
+      tft.setCursor(debug_x, debug_y);
+      tft.setTextColor(TFT_WHITE,TFT_BLUE);    tft.setTextFont(1); tft.setTextSize(1);
+      tft.println(debugbuf);
+      debug_x = tft.getCursorX();
+      debug_y = tft.getCursorY();
+      if (debug_y > TFT_DEBUG_END) {
+        debug_x=1; debug_y=TFT_DEBUG_START;
+        }
+  #endif
       debugbuf="";
       }
 #endif
-
+#ifdef TFT_DISPLAY
+    tft.drawLine(0, 0, 128, 0, TFT_BLACK); //erase the prior reading
+    tft.drawLine(0, 0, (int)(ESP.getVcc()/50), 0, TFT_RBG_COLOR(0,0,255));
+    tft.drawLine(0, 1, TFT_WIDTH, 1, TFT_BLACK); //erase the prior reading
+    tft.drawLine(0, 1, (int)random(80), 1, TFT_RBG_COLOR(255,0,0));
+    showreading("123.456",-TFT_WIDTH,TFT_HEIGHT/4,4);
+#endif
     }
 
 

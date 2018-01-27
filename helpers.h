@@ -1,7 +1,6 @@
 #ifndef HELPERS_H
 #define HELPERS_H
 
-#define DEBUGGING
 
 #ifdef DEBUGGING
 void swapin() {
