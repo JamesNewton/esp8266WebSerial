@@ -1,6 +1,11 @@
 
 
 /* 
+esp8266WebSerial
+Latest version: 1.2.0  - 2016-09-xx by James Newton
+https://github.com/JamesNewton/esp8266WebSerial
+
+Based on:
   ESP_WebConfig 
   http://www.john-lassen.de/index.php/projects/esp-8266-arduino-ide-webconfig
   Copyright (c) 2015 John Lassen. All rights reserved.
@@ -15,11 +20,25 @@
   You should have received a copy of the GNU Lesser General Public
   License along with this library; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+  -----------------------------------------------------------------------------------------------
+  History
 
-  Latest version: 1.2.0  - 2016-09-xx by James Newton
+  Latest Lassen version: 1.1.3  - 2015-07-20
+  Changed the loading of the Javascript and CCS Files, so that they will successively loaded 
+  and that only one request goes to the ESP.
 
-Prior version had problems. First, the little ESP is doing good to deliver one page, but making every click load that 
-page, and the styles, and the js, and the icon, and the values is just too much. 
+
+  Version: 1.1.2  - 2015-07-17
+  Added URLDECODE for some input-fields (SSID, PASSWORD...)
+
+  Version  1.1.1 - 2015-07-12
+  First initial version to the public
+
+
+John Lassen version had problems. First, with the web server operated by polling in the loop,
+the little ESP is doing good to deliver one page, but making every click load that page, and the 
+styles, and the js, and the icon, and the values is just too much. Many of those issues are 
+resolved by moving to ESPAsyncWebServer
 
 It wouldn't be so bad if we could enable casheing of the pages, but that requires a nasty conversion of the time for 
 the Last-Modified header value. Actually... maybe it doesn't... it would appear that a fixed, fake, Last-Modified with
@@ -27,9 +46,7 @@ a fixed Cache-Control: max-age=### works ok. At least in Chrome.
     response->addHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  
     response->addHeader ( "Cache-Control", "max-age=86400" );  
 Actually, the Last-Modified doesn't seem to be needed... Chrome gets by fine with just max-age. Good enough for now.
-
 Putting each page all in one string would be more reliable, but wastes gobs of memory. 
-
 Or we could make ONE page with everything and sections in tabs:
 http://callmenick.com/post/simple-responsive-tabs-javascript-css
 that still leaves us with an ajax request for all the data.
@@ -60,19 +77,7 @@ DB9
 5 YEL GND
 
   
-  -----------------------------------------------------------------------------------------------
-  History
 
-  Latest Lassen version: 1.1.3  - 2015-07-20
-  Changed the loading of the Javascript and CCS Files, so that they will successively loaded 
-  and that only one request goes to the ESP.
-
-
-  Version: 1.1.2  - 2015-07-17
-  Added URLDECODE for some input-fields (SSID, PASSWORD...)
-
-  Version  1.1.1 - 2015-07-12
-  First initial version to the public
   
   */
 #define DEBUGGING
@@ -110,7 +115,9 @@ defines a valid SSID as 0-32 octets with arbitrary contents.
 //#include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <ESPAsyncTCP.h>
+//https://github.com/me-no-dev/AsyncTCP   is required by:
 #include <ESPAsyncWebServer.h>
+//https://github.com/me-no-dev/ESPAsyncWebServer
 #include <ESP8266HTTPClient.h>
 
 #include <Ticker.h>
@@ -124,6 +131,17 @@ defines a valid SSID as 0-32 octets with arbitrary contents.
 /*
 https://github.com/Bodmer/TFT_eSPI Supports using the SPI0 bus:
 https://github.com/Bodmer/TFT_eSPI/issues/74
+
+The exact type of display must be set in \Arduino\libraries\TFT_eSPI-master by updating the
+User_Setup_Select.h files and then the file selected there.
+
+Requires SPI.pins which came in core 2.4.0, but can be added to 2.3.0 by updating the SPI core library
+https://github.com/esp8266/Arduino/tree/af0f5ed956b85e41da647d51d1799db469d6e697/libraries/SPI and also:
+https://github.com/esp8266/Arduino/blob/af0f5ed956b85e41da647d51d1799db469d6e697/cores/esp8266/esp8266_peri.h
+These files live in 
+C:\Users\JamesN2\AppData\Local\Arduino15\packages\esp8266\hardware\esp8266\2.3.0 and libraries\SPI under that
+to recompile the core library, you must fine the spi.o file in the temp folder used for output and delete it
+
 https://www.adafruit.com/product/2088
 http://www.displayfuture.com/Display/datasheet/controller/ST7735.pdf
 https://learn.adafruit.com/adafruit-gfx-graphics-library?view=all
