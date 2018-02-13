@@ -2,7 +2,18 @@
 
 /* 
 esp8266WebSerial
-Latest version: 1.2.0  - 2016-09-xx by James Newton
+Version: 1.3.1  - 2018-02-12 by James Newton 
+Support for ST7735 and ILI9341 and other LCD displays via TFT_eSPI
+
+Version: 1.3.0  - 2017-12-xx by James Newton 
+ESPAsyncWebServer for reliable operation
+Log incoming data / status to server, stream commands from server out to the connected device
+Low power cycle config: sleep for x seconds, wake send data / status to server as available or every x wake cycles.
+"Blink Detect" input to watch error lights, etc... on remote devices (with optional photodiode and flipflop for detection during sleep)
+Wake without radio for very low power input monitoring
+"Pico Jason" interpreter for commands from server to ESP to configure power cycles, logging.
+
+Version: 1.2.0  - 2016-09-xx by James Newton
 https://github.com/JamesNewton/esp8266WebSerial
 
 Based on:
@@ -23,7 +34,7 @@ Based on:
   -----------------------------------------------------------------------------------------------
   History
 
-  Latest Lassen version: 1.1.3  - 2015-07-20
+  Version: 1.1.3  - 2015-07-20
   Changed the loading of the Javascript and CCS Files, so that they will successively loaded 
   and that only one request goes to the ESP.
 
@@ -46,6 +57,7 @@ a fixed Cache-Control: max-age=### works ok. At least in Chrome.
     response->addHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  
     response->addHeader ( "Cache-Control", "max-age=86400" );  
 Actually, the Last-Modified doesn't seem to be needed... Chrome gets by fine with just max-age. Good enough for now.
+
 Putting each page all in one string would be more reliable, but wastes gobs of memory. 
 Or we could make ONE page with everything and sections in tabs:
 http://callmenick.com/post/simple-responsive-tabs-javascript-css
@@ -60,6 +72,9 @@ This requires that we assume HTTP 1.1 clients... shouldn't be an issue.
 Why doesn't that code have to close the connection? E.g. how does server know content is finished? Should it
 use server.close()? Opened an issue about it. 
 https://github.com/esp8266/Arduino/issues/2481
+
+TODO: Looks ESPAsyncWebServer has support for all that already built in:
+https://github.com/me-no-dev/ESPAsyncWebServer#template-processing
 
 Added serial data flow from simple web form to serial port and from serial port to web via regular polling.
 Debug msgs and startup garbage from bootloader are on the standard serial lines TX GPIO1, RX GPIO3. 
@@ -91,9 +106,12 @@ DB9
 #define RTS_OUT 14 
 //not used. May become cable disconnect detect?
 
-//#define BAUD_RATE 9600
-#define DEBUG_BAUD_RATE 38400
+//TODO: Support user configurable device baud rate
+//#define BAUD_RATE 38400
 #define BAUD_RATE 9600
+
+//TODO: Support seperate baud rate for debug messages?
+#define DEBUG_BAUD_RATE 38400
 
 #define AdminTimeOut 0
 //600
@@ -101,24 +119,26 @@ DB9
 //set to 0 to never disable
 
 #define ACCESS_POINT_NAME  "MassMind.org@192.168.4.1"
-#define ACCESS_POINT_PASSWORD  "192.168.4.1" 
-// ACCESS_POINT_IP 192.168.4.1
 /*
 Section 7.3.2.1 of the 802.11-2007 specification 
 http://standards.ieee.org/getieee802/download/802.11-2007.pdf 
 defines a valid SSID as 0-32 octets with arbitrary contents. 
 */
+#define ACCESS_POINT_PASSWORD  "192.168.4.1" 
+//TODO: Make it respond to ALL ip addresses when in Admin mode or
+// pop up a web page automatically on connection ala sign in to WiFi pages.
+// ACCESS_POINT_IP 192.168.4.1
 
 
 #include <ESP8266WiFi.h>
 //#include <WiFiClient.h>
-//#include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <ESPAsyncTCP.h>
 //https://github.com/me-no-dev/AsyncTCP   is required by:
 #include <ESPAsyncWebServer.h>
 //https://github.com/me-no-dev/ESPAsyncWebServer
 #include <ESP8266HTTPClient.h>
+//#include <ESP8266WebServer.h> SUCKS!
 
 #include <Ticker.h>
 #include <EEPROM.h>
