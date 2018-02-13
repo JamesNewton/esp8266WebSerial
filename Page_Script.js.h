@@ -54,8 +54,4 @@ function setValues(url) {
     });
   }
 
-<<<<<<< HEAD
 )=====";
-=======
-)=====";
->>>>>>> 83fa7e5c92ed360d55aadc0e61294994e66eff35

@@ -52,8 +52,4 @@ void processExample(AsyncWebServerRequest *request)
         }
     }
     request->send ( 200, "text/html", PAGE_example  ); 
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 83fa7e5c92ed360d55aadc0e61294994e66eff35
