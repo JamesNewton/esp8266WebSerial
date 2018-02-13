@@ -534,4 +534,8 @@ void send_NTP_configuration_values_html(AsyncWebServerRequest *request){
 	}
 
 
+<<<<<<< HEAD
 #endif
+=======
+#endif
+>>>>>>> 83fa7e5c92ed360d55aadc0e61294994e66eff35

@@ -69,4 +69,8 @@ ESP.deepSleep(MICROSECONDS, WAKE_NO_RFCAL); //deep sleep, assume RF ok, wake bac
 
 
 #endif ESP_SLEEP_H
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> 83fa7e5c92ed360d55aadc0e61294994e66eff35
