@@ -20,7 +20,7 @@ const char PAGE_Root[] PROGMEM = R"=====(
     <pre><div id='log'></div></pre>
     <p>
     <form id='msg' action='data' method='get'>
-    <input id='txt' name='text' type='text'></input><input id='crlf' type='checkbox' checked>+crlf?</input>
+    <input id='txt' name='text' type='text'></input><input id='crlf' type='checkbox' checked>+cr?</input>
     </form></p>
     <p><a href="/admin.html">Settings</a> <a href="/file?start=1">Stream</a></p>
     <script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jquery/1.3/jquery.min.js'></script>

@@ -17,174 +17,81 @@ byte Minute_Old = 100;				// Helpvariable for checking, when a new Minute comes 
 HTTPClient http;
 //http.setReuse(true); //if server allows it
 
+String cmdStr = ""; //holds incomming IO commands.
+boolean havecmd = false; //flag to indicate we have an IO command to process.
+
 /* CONFIGURATION */
+#define CONFIG_VER 1
 
 struct strConfig {
-  boolean dhcp;
-  boolean daylight;
-  long Update_Time_Via_NTP_Every;
-  long timezone;
-  byte LED_R;
-  byte LED_G;
-  byte LED_B;
-  byte  IP[4];
-  byte  Netmask[4];
-  byte  Gateway[4];
-  String password;
-  String ssid;
-  String ntpServerName;
+  boolean dhcp = true;
+  boolean daylight = true;
+  long Update_Time_Via_NTP_Every =  60;
+  long timezone = -8;
+//  byte LED_R;
+//  byte LED_G;
+//  byte LED_B;
+  byte  IP[4]={192,168,1,100};
+  byte  Netmask[4]={255,255,255,0};
+  byte  Gateway[4]={192,168,1,1};
+  char ssid[32] = "attwifi";
+  char password[32]="";
+  char ntpServerName[64] = "0.pool.ntp.org";
+  char streamServerURL[64] = "http://www.massmind.org/techref/getline.asp?"; 
 
-//  boolean AutoTurnOn;
-  boolean Logging;
-//  boolean AutoTurnOff;
-  byte WakeCount;
+  boolean Logging = false;
+  byte WakeCount = 10;
+  long baud = 9600;
+  boolean Connect = true; //should we enable (optional) RS232 level converter?
   //byte TurnOnHour;
-  boolean Connect;
   //byte TurnOnMinute;
   //byte TurnOffHour;
   //byte TurnOffMinute;
-  long Interval; //time to stay asleep
-  boolean sleepy; //flag to set if Interval > 0. NOT actually saved!
+  long Interval = 0; //Time to stay asleep. Zero means stay on.
+  boolean sleepy = false; //flag to set if Interval > 0. doesn't actually need to be saved!
 
-  String DeviceName;
-  String streamServerURL;
+  char DeviceName[32] = "Not Named"; 
+  char datatrigger[10] = "";
+  char dataregexp1[32] = "r_%*x_%4x"; 
+  float dataslope1 = 1;
+  float dataoffset1 = 0;
+  float dataslope2 = 1;
+  float dataoffset2 = 0;
+  float dataslope3 = 1;
+  float dataoffset3 = 0;
+  byte datacount = 0;
+  char dataname1[5] = "????"; //5 because terminating null.
+  char dataname2[5] = "????";
+  char dataname3[5] = "????";
   } config;
-
+  
 void WriteConfig() {
   //EEPROM actually uses SPI_FLASH_SEC_SIZE which appears to be 4096, but we were only allocating 512 bytes on startup
   //because of the way we write the next bit of data past the end of the last here, this is what limited the size of
-  //the values. Oh, and ReadStringFromEEPROM only allows 31 character. TODO: Yike.
-  debugln("Writing Config", "");
+  //the values. Oh, and ReadStringFromEEPROM only allows 65 characters. TODO: Yike.
+  debugln(" Writing Config v", CONFIG_VER);
   EEPROM.write(0, 'C');
   EEPROM.write(1, 'F');
-  EEPROM.write(2, 'G');
-
-  EEPROM.write(16, config.dhcp);
-  EEPROM.write(17, config.daylight);
-
-  EEPROMWritelong(18, config.Update_Time_Via_NTP_Every); // 4 Byte
-
-  EEPROMWritelong(22, config.timezone); // 4 Byte
-
-
-  EEPROM.write(26, config.LED_R);
-  EEPROM.write(27, config.LED_G);
-  EEPROM.write(28, config.LED_B);
-
-  EEPROM.write(32, config.IP[0]);
-  EEPROM.write(33, config.IP[1]);
-  EEPROM.write(34, config.IP[2]);
-  EEPROM.write(35, config.IP[3]);
-
-  EEPROM.write(36, config.Netmask[0]);
-  EEPROM.write(37, config.Netmask[1]);
-  EEPROM.write(38, config.Netmask[2]);
-  EEPROM.write(39, config.Netmask[3]);
-
-  EEPROM.write(40, config.Gateway[0]);
-  EEPROM.write(41, config.Gateway[1]);
-  EEPROM.write(42, config.Gateway[2]);
-  EEPROM.write(43, config.Gateway[3]);
-
-
-  WriteStringToEEPROM(64, config.ssid);
-  WriteStringToEEPROM(96, config.password);
-  WriteStringToEEPROM(128, config.ntpServerName);
-
-  EEPROM.write(300, config.Logging);
-  //EEPROM.write(300, config.AutoTurnOn);
-  EEPROM.write(301, config.WakeCount);
-  //EEPROM.write(301, config.AutoTurnOff);
-  EEPROM.write(302, config.Connect);
-  //EEPROM.write(302, config.TurnOnHour);
-  EEPROMWritelong(303, config.Interval); // 4 Bytes
-  //EEPROM.write(303, config.TurnOnMinute);
-  //EEPROM.write(304, config.TurnOffHour);
-  //EEPROM.write(305, config.TurnOffMinute);
-  
-  WriteStringToEEPROM(307, config.DeviceName);
-  WriteStringToEEPROM(338, config.streamServerURL);
-
+  EEPROM.write(2, CONFIG_VER);
+  EEPROM.put(3,config);
   EEPROM.commit();
-}
+  }
 
 boolean ReadConfig() {
-
-  debug("Reading Configuration. ", "");
-  if (EEPROM.read(0) == 'C' && EEPROM.read(1) == 'F'  && EEPROM.read(2) == 'G' ) {
-    debugln("Found!", "");
-    config.dhcp = 	EEPROM.read(16);
-
-    config.daylight = EEPROM.read(17);
-
-    config.Update_Time_Via_NTP_Every = EEPROMReadlong(18); // 4 Byte
-
-    config.timezone = EEPROMReadlong(22); // 4 Byte
-
-    config.LED_R = EEPROM.read(26);
-    config.LED_G = EEPROM.read(27);
-    config.LED_B = EEPROM.read(28);
-
-    config.IP[0] = EEPROM.read(32);
-    config.IP[1] = EEPROM.read(33);
-    config.IP[2] = EEPROM.read(34);
-    config.IP[3] = EEPROM.read(35);
-    config.Netmask[0] = EEPROM.read(36);
-    config.Netmask[1] = EEPROM.read(37);
-    config.Netmask[2] = EEPROM.read(38);
-    config.Netmask[3] = EEPROM.read(39);
-    config.Gateway[0] = EEPROM.read(40);
-    config.Gateway[1] = EEPROM.read(41);
-    config.Gateway[2] = EEPROM.read(42);
-    config.Gateway[3] = EEPROM.read(43);
-    config.ssid = ReadStringFromEEPROM(64);
-    config.password = ReadStringFromEEPROM(96);
-    config.ntpServerName = ReadStringFromEEPROM(128);
-
-
-    //config.AutoTurnOn = EEPROM.read(300);
-    config.Logging = EEPROM.read(300);
-    config.WakeCount = EEPROM.read(301);
-    //config.AutoTurnOff = EEPROM.read(301);
-    config.Connect = EEPROM.read(302);
-    //config.TurnOnHour = EEPROM.read(302);
-    config.Interval = EEPROMReadlong(303); // 4 Bytes
-    //config.TurnOnMinute = EEPROM.read(303);
-    //config.TurnOffHour = EEPROM.read(304);
-    //config.TurnOffMinute = EEPROM.read(305);
-    config.DeviceName = ReadStringFromEEPROM(307);
-    config.streamServerURL = ReadStringFromEEPROM(338);
+  debug("Reading Config. Found v", EEPROM.read(2));
+  if (EEPROM.read(0) == 'C' && EEPROM.read(1) == 'F'  && EEPROM.read(2) == CONFIG_VER ) {
+    EEPROM.get(3,config);
+    debugln(" loaded v", CONFIG_VER);
     return true;
-  }
-  else {
-    // DEFAULT CONFIG
-    config.ssid = "attwifi";
-    config.password = "";
-    config.dhcp = true;
-    config.IP[0] = 192;config.IP[1] = 168;config.IP[2] = 1;config.IP[3] = 100;
-    config.Netmask[0] = 255;config.Netmask[1] = 255;config.Netmask[2] = 255;config.Netmask[3] = 0;
-    config.Gateway[0] = 192;config.Gateway[1] = 168;config.Gateway[2] = 1;config.Gateway[3] = 1;
-    config.ntpServerName = "0.pool.ntp.org";
-    config.Update_Time_Via_NTP_Every =  60;
-    config.timezone = -10;
-    config.daylight = true;
-    config.DeviceName = "Not Named";
-    //config.AutoTurnOn = false;
-    config.Logging = false;
-    config.WakeCount = 10;
-    //config.AutoTurnOff = false;
-    //config.TurnOnHour = 0;
-    config.Connect = true;
-    config.Interval = 0; //zero means stay on.
-    //config.TurnOnMinute = 0;
-    //config.TurnOffHour = 0;
-    //config.TurnOffMinute = 0;
-    config.streamServerURL = "http://www.massmind.org/techref/getline.asp?";
+    }
+  else { // DEFAULT CONFIG
+    debug(". Replaced w/ default v", CONFIG_VER);
     WriteConfig();
-    debug("","General config applied");
     return false;
   }
 }
+
+
 
 String get_wifi_status() {
   String state = "N/A";
@@ -204,7 +111,7 @@ void ConfigureWifi() {
 
   debugln("Begin Wifi to point:", config.ssid);
   //debugln("Password:",config.password);
-  WiFi.begin (config.ssid.c_str(), config.password.c_str());
+  WiFi.begin (config.ssid, config.password);
   if (!config.dhcp)  {
     debugln(" hardcoded", "");
     WiFi.config(
@@ -240,7 +147,7 @@ byte packetBuffer[ NTP_PACKET_SIZE];
 void NTPRefresh() {
   if (WiFi.status() == WL_CONNECTED) {
     IPAddress timeServerIP;
-    WiFi.hostByName(config.ntpServerName.c_str(), timeServerIP);
+    WiFi.hostByName(config.ntpServerName, timeServerIP);
     //sendNTPpacket(timeServerIP); // send an NTP packet to a time server
 
     debugln("sending NTP packet...","");
@@ -311,15 +218,28 @@ String text;
         break;
       case ':':
         p2 = i; //end of paramter, start of value
-        debug(" param:",response.substring(p1,p2));
+#ifdef DEBUGGING
+        debugbuf+=" param:"+response.substring(p1,p2);
+#endif
         break;
       case ',':
       case '}':
-        debug(", val:",response.substring(p2+1,i));
+#ifdef DEBUGGING
+        debugbuf+=", val:"+response.substring(p2+1,i);
+#endif
         if ( response.substring(p1,p2) == "interval" ) {
           config.Interval = response.substring(p2+1,i).toInt();
           if (config.Interval>0) config.sleepy=true; else config.sleepy=false;
-          debugln(" interval=",config.Interval);
+#ifdef DEBUGGING
+          debugbuf+="\n interval="+String(config.Interval);
+#endif
+          }
+        if ( response.substring(p1,p2) == "cmd" ) {
+          cmdStr=response.substring(p2+1,i);
+#ifdef DEBUGGING
+          debugbuf+="\n cmd";//="+cmdStr;
+#endif
+          havecmd=true;
           }
         p1 = i+1; //start of next parameter if it was ','
         break;

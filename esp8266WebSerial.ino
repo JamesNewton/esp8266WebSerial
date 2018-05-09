@@ -1,5 +1,4 @@
 
-
 /* 
 esp8266WebSerial
 Version: 1.3.1  - 2018-02-12 by James Newton 
@@ -90,21 +89,48 @@ DB9
 3 RED RX (listened to by logger)
 4 ORG
 5 YEL GND
-
-  
-
-  
   */
-#define DEBUGGING
-#define TFT_DISPLAY
 
-#define SERIAL_ENABLE_PIN 5
-#define WAS_BLINK 4
-#define CLEAR_BLINK 2
-#define TX2 15
-#define RX2 13
-#define RTS_OUT 14 
-//not used. May become cable disconnect detect?
+/* DISPLAY / DEBUG: Select at most 1 display type. 
+No workee... you also have to set it in the TFT_eSPI user_setup_select.h file
+*/
+//#define TFT_ADAFRUIT_2088 //original 128x128
+//#define TFT_ADAFRUIT_358 //new 128x160
+#define TFT_ILI9341
+#define PIXELS 26
+//to drive NeoPixels, SK6812, WS2811, WS2812 and WS2813 with hex P command.
+#define DEBUGGING
+
+
+/* PIN SETUP: Note these are GPIO numbers, NOT "D" number ala NodeMCU
+static const uint8_t D0   = 16;
+static const uint8_t D1   = 5;
+static const uint8_t D2   = 4;
+static const uint8_t D3   = 0;
+static const uint8_t D4   = 2;
+static const uint8_t D5   = 14;
+static const uint8_t D6   = 12;
+static const uint8_t D7   = 13;
+static const uint8_t D8   = 15;
+static const uint8_t D9   = 3;
+static const uint8_t D10  = 1;
+*/
+//#define SERIAL_ENABLE_PIN 5
+#define SERIAL_ENABLE_PIN 10
+//AkA CONNECT in web config or F_ON (force on) in schematic. 
+//Changed from pin GPIO5 to GPIO10 (aka NodeMCU SD D3 or just SD3) on 02/15/2018
+#define WAS_BLINK 4 //D2
+#define CLEAR_BLINK 2 //D4 also used for NeoPixels via Serial1 hack
+#define TX2 15 //D8
+#define RX2 13 //D7
+#define CTS_IN 12 //D6
+//TFT pins (optional) also uses CLK, SD0(MISO)?, SD1(MOSI), SD3(IO 10), 
+#define TFT_DC 14 //D5
+#define TFT_CS 0 //D3
+
+//TODO: Actually watch this if customer configures. 
+//#define RTS_OUT 14 
+//RTS not used or connected to sleep. GPIO14, D5 used as TFT_DC
 
 //TODO: Support user configurable device baud rate
 //#define BAUD_RATE 38400
@@ -140,14 +166,52 @@ defines a valid SSID as 0-32 octets with arbitrary contents.
 #include <ESP8266HTTPClient.h>
 //#include <ESP8266WebServer.h> SUCKS!
 
+//#include <Regexp.h>
+//https://github.com/nickgammon/Regexp
+//#include "cstdio.h"
+//for sscanf
+
 #include <Ticker.h>
+//https://github.com/esp8266/Arduino/tree/master/libraries/Ticker
+
 #include <EEPROM.h>
-#include <WiFiUdp.h>
+#include <FS.h> //SPIFFS file system
+//https://github.com/esp8266/Arduino/blob/master/doc/filesystem.rst
+
+//#include <WiFiUdp.h> //not needed unless we want to support ultra fast UDP 2 way coms.
+//https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WiFi/src/WiFiUdp.cpp
 //#include "ESP_Sleep.h"
+
+#ifdef TFT_ILI9341
+#define TFT_DISPLAY
+//#define ILI9341_DRIVER //No workee... you have to set it in the TFT_eSPI user_setup_select.h file
+#endif 
+
+#ifdef TFT_ADAFRUIT_358 //Newer 128x160
+#define TFT_DISPLAY
+//#define ST7735_DRIVER //No workee... you have to set it in the TFT_eSPI user_setup_select.h file
+#define TFT_WIDTH 128
+#define TFT_HEIGHT 160
+#endif 
+
+#ifdef TFT_ADAFRUIT_2088 //original 128x128
+#define TFT_DISPLAY
+//#define ST7735_DRIVER //No workee... you have to set it in the TFT_eSPI user_setup_select.h file
+#define TFT_WIDTH 128
+#define TFT_HEIGHT 128
+#endif 
 
 #ifdef TFT_DISPLAY
 #include <TFT_eSPI.h> // Graphics and font library for ST7735 driver chip
-#include <SPI.h>
+#define TFT_SPI_OVERLAP
+//#define TFT_CS   PIN_D3  // GPIO 0
+//#define TFT_DC   PIN_D5  // GPIO 14 Data Command control pin
+
+#define LOAD_GLCD   // Font 1. Original Adafruit 8 pixel font needs ~1820 bytes in FLASH
+#define LOAD_FONT2  // Font 2. Small 16 pixel high font, needs ~3534 bytes in FLASH, 96 characters
+#define LOAD_FONT4  // Font 4. Medium 26 pixel high font, needs ~5848 bytes in FLASH, 96 characters
+#define LOAD_FONT6  // Font 6. Large 48 pixel font, needs ~2666 bytes in FLASH, only characters 1234567890:-.apm
+
 /*
 https://github.com/Bodmer/TFT_eSPI Supports using the SPI0 bus:
 https://github.com/Bodmer/TFT_eSPI/issues/74
@@ -168,16 +232,17 @@ https://learn.adafruit.com/adafruit-gfx-graphics-library?view=all
  */
 #endif
 
+#ifdef PIXELS
+//#include <NeoPixelAnimator.h>
+//#include <NeoPixelBrightnessBus.h>
+#include <NeoPixelBus.h>
+NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart800KbpsMethod> strip(PIXELS, 2); //number of pixels, pin must be GPIO2, TX1
+#endif
+
 #include "base64.h"
 extern "C" {
 #include <user_interface.h> //Required for getResetInfoPtr()
 }
-
-#include "helpers.h"
-#include "global.h"
-/*
-Include the HTML, STYLE and Script "Pages"
-*/
 
 #ifdef DEBUGGING
 String debugbuf = "";
@@ -189,6 +254,11 @@ int debug_x;
 #endif
 #endif
 
+#include "helpers.h"
+#include "global.h"
+
+
+/* Include the HTML, STYLE and Script "Pages" */
 #include "Page_Root.h"
 #include "Pages.h"
 #include "Page_Style.css.h"
@@ -200,14 +270,14 @@ int debug_x;
 
 //extern "C" int __get_rf_mode(void); causes "unknown function error"
 #define MICROSECONDS 1000000
-ADC_MODE(ADC_VCC);
+//ADC_MODE(ADC_VCC); //include to measure 3.3 volt rail. comment out to use ADC pin. 
 
 /****** Global Variables *****/
 
 //anything defined inside this struct will be saved to RTC memory on DeepSleep and should survive the restart
 //these variables can change constantly and will not wear out the eeprom.
 struct {
-  float count;
+  float count; //TODO: why is this a float?
   bool RFon;
 } rtcmem;
 static_assert (sizeof(rtcmem) < 512, "RTC can't hold more than 512 bytes");
@@ -226,6 +296,9 @@ boolean xoff=false; //flag to see if we need to hold off xmit until device is re
 boolean havedata = false; //flag to indicate data in rxbuf so we don't have to check length each loop.
 String rxbuf = ""; //buffer for data recieved from device.
 #define RFBUF_MAX 128 
+
+int reading1,reading2,reading3; //extracted value from datastream for local display.
+short readingcount = 0;
 
 //If Xoff, recieve bytes until Xon before sending byte.
 void putc_x(byte b) {
@@ -261,6 +334,17 @@ boolean checkSerial(byte timout) {
     else if (c>0 && c<0xFF) { rxbuf += c; havedata=true;} //filter out nulls and FF's.
     if (!Serial.available() && timout) { delay(timout); } //wait a tich if there isn't already more data available. Otherwise, timeout.
     }
+//  regexp.Target(rxbuf);
+//  if (REGEXP_MATCHED == regexp.Match(config.regexp) {
+//    reading1 = hex2int(regexp.GetMatch(rxbuf,0); //extract it.
+//  }
+//  int i = rxbuf.length();
+//  if ( ('+'  == rxbuf[i-8]) || ('-' == rxbuf[i-8]) ) { //detected a reading?
+//    reading1 = hex2int(rxbuf.substring(i-8)); //extract it.
+//    //debug("hexvalue:",reading1);
+//    rxbuf = ""; //TODO: only dump it if valid data and user setting allows.
+//    }
+
   }
 
 #ifdef TFT_DISPLAY
@@ -275,7 +359,7 @@ void showreading(String reading, int x, int y, int fontno) {
     x = -x - tft.textWidth(reading,fontno) - 2;
     if (x<0) x = 0;
     }
-  //tft.fillRect(x,y,TFT_WIDTH-x,tft.fontHeight(fontno),TFT_BACKGROUND);
+  tft.fillRect(0,y,TFT_WIDTH,tft.fontHeight(fontno),TFT_BACKGROUND);
   tft.setCursor(x, y); 
   tft.print(reading);
   }
@@ -283,11 +367,12 @@ void showreading(String reading, int x, int y, int fontno) {
 #endif
 
 void setup ( void ) {
+  EEPROM.begin(512); //EEPROM actually uses SPI_FLASH_SEC_SIZE which appears to be 4096
+  Serial.begin(BAUD_RATE); //take a guess, so we can see debug messages from ReadConfig
+  Serial.swap(); //change to TX GPIO15, RX GPIO13 
   //pinMode(TX2, OUTPUT); //TX line to device should always be an output
   //digitalWrite(TX2, HIGH); //when not used as serial, keep TX high or device will see nulls or FF's
   //pinMode(RX2,INPUT_PULLUP); // when not used as serial, keep RX high or we may see nulls or FF's
-  Serial.begin(BAUD_RATE);
-  Serial.swap(); //change to TX GPIO15, RX GPIO13 
   pinMode(SERIAL_ENABLE_PIN, OUTPUT);
   digitalWrite(SERIAL_ENABLE_PIN, LOW);
   pinMode(WAS_BLINK, INPUT);
@@ -312,10 +397,14 @@ void setup ( void ) {
       debugln(" for RTC Tick ",rtcmem.count);
       break;
     }
-	EEPROM.begin(512); //EEPROM actually uses SPI_FLASH_SEC_SIZE which appears to be 4096
 
   ReadConfig(); //returns false and sets up default config if none found. See global.h
   config.Interval = 0; //Temporary: Use to break out of sleep loop.
+  debugln(config.baud," baud");
+  config.baud = 9600; //temporary 
+  Serial.swap(); //change back
+  Serial.begin(config.baud);
+  Serial.swap(); //change to TX GPIO15, RX GPIO13 
   
   if (config.Interval > 0) config.sleepy=true; else config.sleepy=false;
   if (rtcmem.count >= config.WakeCount) {
@@ -354,12 +443,20 @@ void setup ( void ) {
   debug_x=1; debug_y=TFT_DEBUG_START;
   #endif
 #endif
+#ifdef PIXELS
+  strip.Begin();
+  strip.Show();
+#endif
 
   if (config.Connect) {
     digitalWrite(SERIAL_ENABLE_PIN, HIGH);
-    debugln("Serial port enabled","");
+    debugln("Device port enabled","");
     }
-
+  else {
+    debugln("Device port disabled","");
+    }
+  readingcount = config.datacount;
+  
 //uncomment the next line if you need the mac address for your router.
   debugln("MAC:",GetMacAddress());
   uint8_t mac[6];
@@ -390,23 +487,26 @@ void setup ( void ) {
 	}
  
 	ConfigureWifi();
-	
+	SPIFFS.begin(); 
   server.on ( "/", HTTP_GET, handle_root  ); //main web page in Page_Root.h
 	server.on ( "/admin.html", HTTP_GET, [](AsyncWebServerRequest *request) { //settings menu
 #ifdef DEBUGGING
 	  debugbuf += "admin.html";
 #endif
     AsyncWebServerResponse *response = request->beginResponse(200, "text/html", PAGE_AdminMainPage); //in Pages.h
-  // Sets Content-Length to 1 more than actual length.
-//    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", (const uint8_t *)PAGE_AdminMainPage, strlen(PAGE_AdminMainPage)); 
-    //no matching function for call to 'AsyncWebServerRequest::beginResponse(int, const char [10], const uint8_t*, size_t)'
-//    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", PAGE_AdminMainPage);
     response->addHeader ( "Cache-Control", "max-age=86400" );  //doesn't change, let the browser know
     //response->addHeader ( "Last-Modified", "Wed, 25 Feb 2015 12:00:00 GMT" );  //doesn't appear to work
 	  request->send ( response );   
 	  }  );
   server.on ( "/general.html", HTTP_GET, send_general_html  ); //in Pages.h
   server.on ( "/general.html", HTTP_POST, send_general_html  ); //ESPAsyncWebServer needs separate GET and POST handlers
+  server.on ( "/device.html", HTTP_GET, send_device_html  ); //in Pages.h
+  server.on ( "/device.html", HTTP_POST, send_device_html  ); //in Pages.h
+  server.on ( "/update", HTTP_GET, send_fs_html  ); //in Pages.h
+  //server.onFileUpload(handle_fs_upload); //in Pages.h
+  server.on ( "/update", HTTP_POST, [](AsyncWebServerRequest *request){
+      request->send(200);
+    }, handle_fs_upload  ); //in Pages.h
   server.on ( "/config.html", HTTP_GET, send_network_configuration_html );
   server.on ( "/config.html", HTTP_POST, send_network_configuration_html );
 	server.on ( "/info.html", HTTP_GET, [](AsyncWebServerRequest *request) { 
@@ -446,9 +546,9 @@ void setup ( void ) {
 	server.on ( "/admin/devicename", HTTP_GET, send_devicename_value_html);
   server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){  
     if (request->hasArg("text")) {
-      writeStr_x(request->arg("text")); //pass on what was sent
+      writeStr_x(parseServer(request->arg("text"))); //pass on what was sent less server msgs
       Serial.flush(); //complete the send before going on
-      rxbuf=""; havedata=false; //done with that data.
+      rxbuf=""; havedata=false; //done with that data. TODO: Why are we doing this here?
       //delay(10); //give the device time to respond //nope, can't 'cause AsyncWebServer, get it next browser request
       checkSerial(0); // get any text that comes back now //parameter is delay, must be 0 with AsyncWebServer
       }
@@ -515,6 +615,7 @@ void setup ( void ) {
 #endif
 	  request->send ( 404, "text/html", "Page not Found" );
 	  }  );
+  server.serveStatic("/", SPIFFS, "/").setTemplateProcessor(send_tag_values);
 	server.begin();
 	debugln("HTTP server started on port:","80" );
   debugln("Response Length:", strlen(PAGE_AdminMainPage));
@@ -560,9 +661,8 @@ void loop ( void ) {
     debugln("","");
 #endif
 #ifdef TFT_DISPLAY
-    tft.setCursor(0, 2);
     if (WL_CONNECTED == WiFi.status()) { 
-      tft.setCursor(1, 2);//leave room for power status
+      tft.setCursor(2, 2);//leave room for power status
       tft.setTextColor(TFT_YELLOW,TFT_BACKGROUND); tft.setTextFont(2); tft.setTextSize(1);
       IPAddress ip = WiFi.localIP();
       tft.print(String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + ".");
@@ -634,17 +734,19 @@ void loop ( void ) {
     }
     
   checkSerial(1); 
-  // if we aren't connected to a browser, rxbuf will overflow
-  // TODO: try to log rxbuf to a server
-  // HACK: For now, just dump 
+//http://www.cplusplus.com/reference/cstdio/scanf/ 
+  if (0<sscanf(rxbuf.c_str(),config.dataregexp1,&reading1,&reading2,&reading3)) {
+    rxbuf="";
+    debugbuf+="^"; 
+    }
 
 
   if ( ( config.Logging && ( havedata || digitalRead(WAS_BLINK) ) )
   //http://www.massmind.org/techref/getline.asp?id=GP40noFt&line=200&lines=1000
   ) {
     streamURL = config.streamServerURL;
-    if (!http.begin(streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf) + "&blink=" + (String) (digitalRead(WAS_BLINK)? "YES": "NO") ) ) {
-      debug("Failed to open ",streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf));
+    if (!http.begin(streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf.c_str()) + "&blink=" + (String) (digitalRead(WAS_BLINK)? "YES": "NO") ) ) {
+      debug("Failed to open ",streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf.c_str()));
       }
     else {
       int httpCode = http.GET(); //blocking TODO: Timeout?
@@ -672,37 +774,83 @@ void loop ( void ) {
           }
         if (rtcmem.count >= config.WakeCount) {rtcmem.count = 0;} //reset checkin count.
         digitalWrite(CLEAR_BLINK, LOW); //disable any further blinks while we are awake.
+        pinMode(CLEAR_BLINK, OUTPUT); //incase it was overwritten by Serial1 NeoPixel cmdString
         //TODO: Don't we want to see additional blinks?
         }
       else { 
-        debugln("Logging failed to ",streamURL + "id=" + DeviceID + "&data=" + urlencode(rxbuf));
+        debug("Logging failed to ",streamURL);
+        debug("id=", DeviceID);
+        debug("&data=", urlencode(rxbuf.c_str()));
         debug("error:",http.errorToString(httpCode));
         debugln(" errorcode:",httpCode);
         debugln(" log:",http.getString());
         delay(1000);
+  // if we aren't connected to a browser, rxbuf will overflow
+  // TODO: try to log rxbuf to SPIFFs if a server isn't reachable.
+  // TODO: At least just dump all but the last x characters. 
+  // HACK: For now, just dump 
+        rxbuf="";
         }
       http.end();
       }
     }
 
+  if (havecmd) {
+    havecmd = false;
 
+    debug(cmdStr.length(),"chars");
+    debugln(" cmd:", cmdStr);
+#ifdef PIXELS
+    //https://github.com/Makuna/NeoPixelBus/blob/master/src/internal/NeoEsp8266UartMethod.cpp
+    uint16_t pixno;
+    uint8_t redness,greenness,blueness;
+    debug(" pixels",cmdStr.length()>>2);
+    //http://192.168.0.127/data?text={cmd:aF84bF84cF84dF84eF84fF84gF84hF84iF84jF84kF84lF84mF84nF84oF84pF84qF84rF84sF84tF84uF84vF84wF84xF84yF84}
+    //http://192.168.0.127/data?text={cmd:yF84xF84wF84vF84uF84tF84sF84rF84qF84pF84oF84nF84mF84lF84kF84jF84iF84hF84gF84fF84eF84dF84cF84bF84aF84}
+    //http://192.168.0.127/data?text={cmd:a48Fb48Fc48Fd48Fe48Ff48Fg48Fh48Fi48Fj48Fk48Fl48Fm48Fn48Fo48Fp48Fq48Fr48Fs48Ft48Fu48Fv48Fw48Fx48Fy48F}
+    while( cmdStr.length()>=4) {
+      pixno = cmdStr[0]-'a';
+      redness = h2int(cmdStr[1])<<4;
+      greenness = h2int(cmdStr[2])<<4;
+      blueness = h2int(cmdStr[3])<<4;
+      debug(" #",pixno);
+      debug(" R",redness);
+      debug(" G",greenness);
+      debugln(" B",blueness);
+      strip.SetPixelColor(pixno, RgbColor(redness, greenness, blueness) );
+      //strip.SetPixelColor(h2int(cmdStr[0]), RgbColor(h2int(cmdStr[1]),h2int(cmdStr[2]),h2int(cmdStr[3])) );
+      cmdStr = cmdStr.substring(4);
+      } //done with pixels
+    strip.Show();
+#endif
+    cmdStr="";
+    } //done with cmd
+  
 	if (Refresh)  { //Refresh gets set once a second by Second_Tick() in global.h
 		Refresh = false; //service it here when we get a round toit.
     if (!AdminEnabled   //not in admin mode
       && config.Logging //and we are logging, but
       && config.sleepy  //we are setup to go to sleep //config.Interval>0 causes webserver issues here
-      && !havedata      //not waiting on data to be logged to the server //rxbuf.length()==0 causes webserver issues here
+      && !havedata      //not waiting on data to be logged to the server //rxbuf.length()==0 causes old webserver issues here
       ) {               //then lets go to sleep
         debugln("Sleep for ",config.Interval);
         digitalWrite(CLEAR_BLINK, HIGH); //allow new blinks to be detected
+        pinMode(CLEAR_BLINK, OUTPUT); //incase it was overwritten by Serial1 NeoPixel cmdString
+
         //TODO: Drop the connection to the device.
         ESP.rtcUserMemoryWrite(0, (uint32_t*) &rtcmem, sizeof(rtcmem)); //write data to RTC memory so we don't loose it.
         //TODO: Compensate for how long we have already been awake. e.g. (Interval - DateTime.Seconds)
         ESP.deepSleep(config.Interval * MICROSECONDS, WAKE_NO_RFCAL); //deep sleep, assume RF ok, wake back up in setup.
       }
-//    else {
+    else {
 //      debugln(config.sleepy?"1":"0",havedata?"1":"0");
-//      }
+#ifdef TFT_DISPLAY
+      if (config.datacount && !readingcount--) {
+        readingcount = config.datacount;
+        writeStr_x(config.datatrigger);
+        }
+#endif
+      }
 
 #ifdef DEBUGGING
     if (debugbuf.length()>0) {
@@ -721,11 +869,16 @@ void loop ( void ) {
       }
 #endif
 #ifdef TFT_DISPLAY
-    tft.drawLine(0, 0, 128, 0, TFT_BLACK); //erase the prior reading
-    tft.drawLine(0, 0, (int)(ESP.getVcc()/50), 0, TFT_RBG_COLOR(0,0,255));
-    tft.drawLine(0, 1, TFT_WIDTH, 1, TFT_BLACK); //erase the prior reading
-    tft.drawLine(0, 1, (int)random(80), 1, TFT_RBG_COLOR(255,0,0));
-    showreading("123.456",-TFT_WIDTH,TFT_HEIGHT/4,4);
+    if (config.datacount) { //don't mess with this if we aren't updating the local display.
+      tft.drawLine(0, 0, 128, 0, TFT_BLACK); //erase the prior reading
+      //tft.drawLine(0, 0, (int)(ESP.getVcc()/50), 0, TFT_RBG_COLOR(0,0,255)); //read power rail. Needs ADC_MODE(ADC_VCC);
+      tft.drawLine(0, 0, (int)(analogRead(A0)*TFT_WIDTH/1024), 0, TFT_RBG_COLOR(0,0,255)); //Read analog input. 0-1.0 volts
+      tft.drawLine(0, 1, TFT_WIDTH, 1, TFT_BLACK); //erase the prior reading
+      tft.drawLine(0, 1, (int)random(80), 1, TFT_RBG_COLOR(255,0,0)); //TODO: Replace with something useful
+      showreading(String(config.dataslope1*(float)reading1+config.dataoffset1)+config.dataname1,-TFT_WIDTH,TFT_HEIGHT/3,4);
+      showreading(String(config.dataslope2*(float)reading2+config.dataoffset2)+config.dataname2,-TFT_WIDTH,TFT_HEIGHT/2,4);
+      showreading(String(config.dataslope3*(float)reading3+config.dataoffset3)+config.dataname3,-TFT_WIDTH,TFT_HEIGHT/1.5,4);
+      }
 #endif
     }
 

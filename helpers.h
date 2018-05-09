@@ -103,7 +103,7 @@ String  ReadStringFromEEPROM(int beginaddress)
 	{
 		rChar = EEPROM.read(beginaddress + counter);
 		if (rChar == 0) break;
-		if (counter > 60) break;
+		if (counter > 65) break;
 		counter++;
 		retString.concat(rChar);
 
@@ -194,9 +194,14 @@ String GetMacAddress() {
     char macStr[18] = {0};
 	WiFi.macAddress(mac);
     sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0],  mac[1], mac[2], mac[3], mac[4], mac[5]);
+    //TODO: Rewrite using nibble2hex as sprintf is expensive. 
     return  String(macStr);
   }
-
+  
+char nibble2hex(char c) {
+    return "0123456789ABCDEF"[c&0xf];
+  }
+  
 // convert a single hex digit character to its integer value (from https://code.google.com/p/avr-netino/)
 unsigned char h2int(char c) {
   if (c >= '0' && c <='9') { return((unsigned char)c - '0');      }
@@ -205,9 +210,19 @@ unsigned char h2int(char c) {
   return(0);
   }
 
-String urldecode(String input) {// (based on https://code.google.com/p/avr-netino/)
+int hex2int(String s) {
+  int v=0;
+  for (int i = s.length(); i>0; i--) { //index s from right (msb) to left (lsb)
+    v |= h2int(s[i]);
+    v *= 16;
+    }
+  if ('-'==s[0]) v=-v;
+  return v;
+  }
+
+int urldecode(String input, char *output, int len) {// (based on https://code.google.com/p/avr-netino/)
 char c;
-String ret = "";
+  len--; //leave room for the terminating zero.
   for(byte t=0;t<input.length();t++) {
 	  c = input[t];
     if (c == '+') c = ' ';
@@ -217,46 +232,48 @@ String ret = "";
       t++;
       c = (h2int(c) << 4) | h2int(input[t]);
       }
-    ret.concat(c);
+    *output++=c;
+    if (0 >= --len) break; 
     }
-	return ret;
+  *output='\0';
+	return len;
   }
 
-String urlencode(String str) {
-String encodedString="";
-char c;
-char code0;
-char code1;
-char code2;
-  for (int i =0; i < str.length(); i++){
-    c=str.charAt(i);
-    if (c == ' '){
-      encodedString+= '+';
+String urlencode(const char *str) {
+  String encoded = String();
+  encoded.reserve(strlen(str)*2); // what is generally enough
+  char c;
+  while (c = *str++){
+    if (' ' == c){
+      encoded+= '+';
       } 
     else if (isalnum(c)){
-      encodedString+=c;
+      encoded+=c;
       } 
     else{
-      code1=(c & 0xf)+'0';
-      if ((c & 0xf) >9){
-          code1=(c & 0xf) - 10 + 'A';
-          }
-      c=(c>>4)&0xf;
-      code0=c+'0';
-      if (c > 9){
-          code0=c - 10 + 'A';
-          }
-      code2='\0';
-      encodedString+='%';
-      encodedString+=code0;
-      encodedString+=code1;
-      //encodedString+=code2;
+      encoded+='%';
+      encoded+=nibble2hex(c>>4);
+      encoded+=nibble2hex(c);
       }
-    yield();
     }
-  return encodedString;
+  return encoded;
   }
 
-
+String HTMLencode(const char *str) {
+    String encoded = String();
+    encoded.reserve(strlen(str)*2);
+    char c;
+    while (c = *str++){
+        switch(c) {
+            case '&':  encoded+="&amp;";  break;
+            case '\"': encoded+="&quot;"; break;
+            case '\'': encoded+="&apos;"; break;
+            case '<':  encoded+="&lt;";   break;
+            case '>':  encoded+="&gt;";   break;
+            default:   encoded+=c;        break;
+            }
+        }
+    return encoded;
+    }
  
 #endif
