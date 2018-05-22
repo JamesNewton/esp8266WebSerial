@@ -96,9 +96,11 @@ No workee... you also have to set it in the TFT_eSPI user_setup_select.h file
 */
 //#define TFT_ADAFRUIT_2088 //original 128x128
 //#define TFT_ADAFRUIT_358 //new 128x160
-#define TFT_ILI9341
-#define PIXELS 26
+//#define TFT_ILI9341
+#define EPAPER 1.5
+
 //to drive NeoPixels, SK6812, WS2811, WS2812 and WS2813 with hex P command.
+//#define PIXELS 26
 #define DEBUGGING
 
 

@@ -1,0 +1,47 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="microajax.js"></script> 
+<html>
+  <head>
+    <title>ESP8266 IOT Serial to Web</title>
+    <style>
+      body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }
+    </style>
+  <meta charset="utf-8" />
+  </head>
+  <body>
+    <pre><div id='log'></div></pre>
+    <p>
+    <form id='msg' action='data' method='get'>
+    <input id='txt' name='text' type='text'></input><input id='crlf' type='checkbox' checked>+cr?</input>
+    </form></p>
+    <p><a href="/admin.html">Settings</a> <!-- <a href="/file?start=1">Stream</a> --> </p>
+    <script type='text/javascript' src='/jquery-3.3.1.min.js'></script>
+    
+    <script type='text/javascript'>
+$('#msg').submit(function(){ 
+    var clientmsg = $('#txt').val();
+    if ($('#crlf').is(':checked')) clientmsg+='\r';
+    var log=$('#log');
+    log.html(log.html()+'<b>'+clientmsg+'</b>');
+    $.get('data', {text: clientmsg}, function(html){
+        log.html(log.html()+html);
+        });
+    $('#txt').attr('value', '');
+    loadLog(); //instantly pick up any response.
+    return false;
+  });
+function loadLog(){
+  var log=$('#log');
+  $.ajax({
+      url: 'data',
+      cache: false,
+      success: function(html){
+        log.html(log.html()+html);
+        },
+    });
+  };
+ setInterval (loadLog, 2500);
+      </script>
+  </body>
+</html>
