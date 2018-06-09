@@ -96,8 +96,8 @@ No workee... you also have to set it in the TFT_eSPI user_setup_select.h file
 */
 //#define TFT_ADAFRUIT_2088 //original 128x128
 //#define TFT_ADAFRUIT_358 //new 128x160
-//#define TFT_ILI9341
-#define EPAPER 1.5
+#define TFT_ILI9341
+//#define EPAPER 1.5
 
 //to drive NeoPixels, SK6812, WS2811, WS2812 and WS2813 with hex P command.
 //#define PIXELS 26
@@ -117,8 +117,9 @@ static const uint8_t D8   = 15;
 static const uint8_t D9   = 3;
 static const uint8_t D10  = 1;
 */
-//#define SERIAL_ENABLE_PIN 5
-#define SERIAL_ENABLE_PIN 10
+
+#define SERIAL_ENABLE_PIN 5
+//#define SERIAL_ENABLE_PIN 10 //NO! IO 10 is NOT available.
 //AkA CONNECT in web config or F_ON (force on) in schematic. 
 //Changed from pin GPIO5 to GPIO10 (aka NodeMCU SD D3 or just SD3) on 02/15/2018
 #define WAS_BLINK 4 //D2
@@ -134,7 +135,7 @@ static const uint8_t D10  = 1;
 //#define RTS_OUT 14 
 //RTS not used or connected to sleep. GPIO14, D5 used as TFT_DC
 
-//TODO: Support user configurable device baud rate
+//Default: user configurable device baud rate on device screen
 //#define BAUD_RATE 38400
 #define BAUD_RATE 9600
 
@@ -297,10 +298,13 @@ int streamBufLine = 0;
 boolean xoff=false; //flag to see if we need to hold off xmit until device is ready
 boolean havedata = false; //flag to indicate data in rxbuf so we don't have to check length each loop.
 String rxbuf = ""; //buffer for data recieved from device.
+String txbuf = ""; //buffer for data to send to the device.
 #define RFBUF_MAX 128 
 
 int reading1,reading2,reading3; //extracted value from datastream for local display.
 short readingcount = 0;
+
+byte pwrondelay = 0; //countdown to send power on string to device
 
 //If Xoff, recieve bytes until Xon before sending byte.
 void putc_x(byte b) {
@@ -449,13 +453,14 @@ void setup ( void ) {
   strip.Begin();
   strip.Show();
 #endif
-
+  pwrondelay = config.pwrondelay;
   if (config.Connect) {
     digitalWrite(SERIAL_ENABLE_PIN, HIGH);
     debugln("Device port enabled","");
     }
   else {
     debugln("Device port disabled","");
+    pwrondelay = 0; //no point in doing pwr on string if no device.
     }
   readingcount = config.datacount;
   
@@ -490,7 +495,7 @@ void setup ( void ) {
  
 	ConfigureWifi();
 	SPIFFS.begin(); 
-  server.on ( "/", HTTP_GET, handle_root  ); //main web page in Page_Root.h
+  server.on ( "/root", HTTP_GET, handle_root  ); //main web page in Page_Root.h
 	server.on ( "/admin.html", HTTP_GET, [](AsyncWebServerRequest *request) { //settings menu
 #ifdef DEBUGGING
 	  debugbuf += "admin.html";
@@ -505,7 +510,6 @@ void setup ( void ) {
   server.on ( "/device.html", HTTP_GET, send_device_html  ); //in Pages.h
   server.on ( "/device.html", HTTP_POST, send_device_html  ); //in Pages.h
   server.on ( "/update", HTTP_GET, send_fs_html  ); //in Pages.h
-  //server.onFileUpload(handle_fs_upload); //in Pages.h
   server.on ( "/update", HTTP_POST, [](AsyncWebServerRequest *request){
       request->send(200);
     }, handle_fs_upload  ); //in Pages.h
@@ -548,8 +552,11 @@ void setup ( void ) {
 	server.on ( "/admin/devicename", HTTP_GET, send_devicename_value_html);
   server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){  
     if (request->hasArg("text")) {
-      writeStr_x(parseServer(request->arg("text"))); //pass on what was sent less server msgs
-      Serial.flush(); //complete the send before going on
+      txbuf = parseServer(request->arg("text"));
+      writeStr_x(txbuf); //pass on what was sent less server msgs
+      Serial.flush(); //complete the send before going on TODO: Can we wait that long?
+      debugq("<"+txbuf);
+      txbuf="";
       rxbuf=""; havedata=false; //done with that data. TODO: Why are we doing this here?
       //delay(10); //give the device time to respond //nope, can't 'cause AsyncWebServer, get it next browser request
       checkSerial(0); // get any text that comes back now //parameter is delay, must be 0 with AsyncWebServer
@@ -609,7 +616,7 @@ void setup ( void ) {
         }
       }
     });
-	server.onNotFound ( [](AsyncWebServerRequest *request) { 
+	server.onNotFound ( [](AsyncWebServerRequest *request) { //TODO: serve root if no 
 #ifdef DEBUGGING
 	  debugbuf+="404:";
 	  debugbuf+=request->url(); 
@@ -853,7 +860,15 @@ void loop ( void ) {
         }
 #endif
       }
-
+      
+    if (pwrondelay) { //waiting to send power on string
+      debugq(String(pwrondelay--));
+      if (!pwrondelay) { 
+        writeStr_x(config.pwronstr); 
+        debugq("<"+String(config.pwronstr));
+        } 
+      }
+      
 #ifdef DEBUGGING
     if (debugbuf.length()>0) {
       debugln(debugbuf,"");
@@ -882,7 +897,8 @@ void loop ( void ) {
       showreading(String(config.dataslope3*(float)reading3+config.dataoffset3)+config.dataname3,-TFT_WIDTH,TFT_HEIGHT/1.5,4);
       }
 #endif
-    }
+
+    } // End 1 second Refresh tick
 
 
   } // main loop
