@@ -51,8 +51,8 @@ struct strConfig {
   boolean sleepy = false; //flag to set if Interval > 0. doesn't actually need to be saved!
 
   char DeviceName[32] = "Not Named"; 
-  char datatrigger[10] = "";
-  char dataregexp1[32] = "r_%*x_%4x"; 
+  char datatrigger[10] = "r%0D";
+  char dataregexp1[32] = "r%*1crr_%4x0_%4x%*x_%4x"; 
   float dataslope1 = 1;
   float dataoffset1 = 0;
   float dataslope2 = 1;
@@ -63,6 +63,8 @@ struct strConfig {
   char dataname1[5] = "????"; //5 because terminating null.
   char dataname2[5] = "????";
   char dataname3[5] = "????";
+  char pwronstr[10] = "";
+  byte pwrondelay = 0;
   } config;
   
 void WriteConfig() {
@@ -204,7 +206,7 @@ void Second_Tick() {
 
 String parseServer(String response) { //get out any settings and make those changes, leaving just the text to send to the device.
 char c;
-int p1,p2=0;
+int p1=0,p2=0;
 String text;
   for (int i =0; i < response.length(); i++){
     c=response.charAt(i);
