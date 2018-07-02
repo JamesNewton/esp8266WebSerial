@@ -23,10 +23,17 @@ String send_tag_values(const String& tag) {
   if (tag == "dataoffset3") return String(config.dataoffset3,7);
   if (tag == "dataname3") return (String) config.dataname3;
   if (tag == "datacount") return (String) config.datacount;
+  if (tag == "pwronstr") return (String) config.pwronstr;
+  if (tag == "pwrondelay") return (String) config.pwrondelay;
+
+  
   if (tag == "directory") {
     String dirlist = "";
     Dir dir = SPIFFS.openDir("/");
     while (dir.next()) {
+      dirlist += "<a href=\"/update?delete=";
+      dirlist += String(dir.fileName());
+      dirlist += "\">x</a> ";
       dirlist += String(dir.fileName());
       dirlist += "\t ";
       File f = dir.openFile("r");
@@ -83,7 +90,7 @@ const char PAGE_AdminGeneralSettings[] PROGMEM =  R"=====(
 <tr><td align="right"> Enabled:</td><td><input type="checkbox" id="logging" name="logging" `logging`></td></tr>
 <tr><td align="right"> Interval:</td><td><input type="text" id="interval" name="interval" size="6" value="`interval`"> Seconds</td></tr>
 <tr><td align="right"> Check in every:</td><td><input type="text" id="wakecount" name="wakecount" size="6" value="`wakecount`"> intervals</td></tr>
-<tr><td colspan="2">Stream Server:<br><input type="text" id="server" name="server" size="65" value="`server`"></td></tr>
+<tr><td colspan="2">Server:<br><input type="text" id="server" name="server" size="65" value="`server`"></td></tr>
 <tr><td colspan="2" align="center"><input id="save" type="submit" style="width:150px" class="btn btn--m btn--blue" value="Save"></td></tr>
 </table>
 </form>
@@ -213,6 +220,7 @@ const char PAGE_FileSystem[] PROGMEM =  R"=====(
       Upload: <br><input type="file" name="name">
       <input class="button" type="submit" value="Upload">
       </form>
+   Delete: Press 'x' before file, then append '&now' to url to actually remove the file. 
   </BODY>
 </HTML>
 )=====";
@@ -245,7 +253,10 @@ static File fsUploadFile; //Used with SPIFFS to upload files.
 void send_fs_html(AsyncWebServerRequest *request){
   if (request->args() > 0 )  { // Work to do
     for ( uint8_t i = 0; i < request->args(); i++ ) {
-      if (request->argName(i) == "delete") debugbuf+= "delete"+ request->arg(i); 
+      if (request->argName(i) == "delete") {
+        debugbuf+= "delete:" + request->arg(i)+".\n"; 
+        if (request->hasArg("now")) SPIFFS.remove(request->arg(i));
+        }
       }
     }
   debugbuf+=__FUNCTION__;
@@ -268,8 +279,13 @@ const char PAGE_AdminDeviceSettings[] PROGMEM =  R"=====(
   <form action="" method="post">
     <table border="0"  cellspacing="0" cellpadding="3" >
       <tr><td align="right">Baud rate</td><td><input type="text" id="baud" name="baud" value="`baud`"></td></tr>
-      <tr><td align="right"> Enable Connection:</td><td><input type="checkbox" id="connect" name="connect" `Connect`></td></tr>
+      <tr><td align="right"> Connection:</td><td><input type="checkbox" id="connect" name="connect" `Connect`>Enabled</input></td></tr>
       <tr><td align="right"> Blink?:</td><td><div id="blinked">`blinked`</div></td></tr>
+      <tr><td align="left" colspan="2"><hr></td></tr>
+      <tr><td align="right"> Initialization:</td><td>
+        Send: <input type="text" id="pwronstr" name="pwronstr" value="`pwronstr`" size=6>
+        after <input type="text" id="pwrondelay" name="pwrondelay" value="`pwrondelay`" size=3 title="zero to disable"> Seconds
+        </td></tr>
       <tr><td align="left" colspan="2"><hr></td></tr>
       <tr><td align="left" colspan="2">Extracted Data Reading: (<a href="http://www.cplusplus.com/reference/cstdio/scanf/">Data Pattern help</a>)</td></tr>
       <tr><td align="right"> Trigger:</td><td>
@@ -325,6 +341,8 @@ void send_device_html(AsyncWebServerRequest *request){
       else if (request->argName(i) == "dataoffset3") config.dataoffset3 = request->arg(i).toFloat(); 
       else if (request->argName(i) == "dataname3") strlcpy( config.dataname3, request->arg(i).c_str(), sizeof(config.dataname3)); 
       else if (request->argName(i) == "datacount") config.datacount = request->arg(i).toInt(); 
+      else if (request->argName(i) == "pwronstr") strlcpy( config.pwronstr, request->arg(i).c_str(), sizeof(config.pwronstr)); 
+      else if (request->argName(i) == "pwrondelay") config.pwrondelay = request->arg(i).toInt(); 
       }
     WriteConfig();
     if (config.Connect) {

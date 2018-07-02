@@ -28,12 +28,14 @@ void swapout() {
 #define debugln(dir,msg) swapin();Serial.print(dir);Serial.println(msg);swapout();
 //adding Serial.print(0); seems to compensate for the loss of the last crlf when using ESPAsyncWebServer
 #define debughex(msg) swapin();Serial.print(">");for(int i=0;i<msg.length();i++) {Serial.print(msg[i],HEX);Serial.print(' ');}; swapout();
+#define debugq(msg) debugbuf += msg;
 
 #else
 
 #define debugln(dir,msg) 
 #define debug(dir,msg) 
 #define debughex(msg)
+#define debugq(msg)
 
 #endif
 

@@ -1,6 +1,44 @@
 
 /* 
 esp8266WebSerial
+Version: 1.3.2 - 2018-07-02 by James Newton
+-DEBUG levels: 1 for serial only, 2 for serial and display.
+-User config device baudrate, poweron initialization string, data extraction and display:
+-- New /device.html page to configure all connected device options
+-- Send config.pwronstr to device pwrondelay seconds after startup
+-- Extract up to 3 data items returned from device for local display via scanf code:
+   http://www.cplusplus.com/reference/cstdio/scanf/
+-- Extracted values multiplied by slope plus offset and shown with name on the display
+-global.h config load/save simplified with EEPROM.get / EEPROM.put.
+-CONFIG_VER version number added. This update will clear prior config data to default!
+-txbuf to hold data waiting to be sent to the device so we can send this in a debug message
+-Support "hidden" /update page to upload web/js/css/etc files into SPIFFS for web server. 
+ This allows customization and rebranding for your solution without the need for Arduino code development. 
+ Put your own html/javascript in the device for user interface.
+-Default web page is index.htm from SPIFFS. /root is handle_root from Page_Root.h 
+  i.e. http://ip/ will display nothing until index.htm is uploaded via http://ip/update. 
+  If you want to use the built in homepage, go to http://ip/root
+  TODO: serve root automatically if no index.htm in SPIFFS
+-Built in /root page converted from jquery to raw javascript for increased reliability and smaller size. 
+   This is critical when working in poor RF environments while directly connected to the device. 
+-Use template processor in ESPAsyncWebServer for config pages. There are problems with this, see:
+-- https://github.com/me-no-dev/ESPAsyncWebServer/issues/333 Must change TEMPLATE_PLACEHOLDER to '`' 
+    in \libraries\ESPAsyncWebServer\src\WebResponseImpl.h and trigger library re-compile
+-- https://github.com/me-no-dev/ESPAsyncWebServer/issues/374 Must use "AI-THINKER" ESP-12E units
+-- Network setup /config.html NOT updated to templates for this reason. 
+-Moving to a single general tag processor function "send_tag_values"
+-Moving to standard linking to .css and .js resources from config pages instead of the javascript window.onload functions.
+-Add debugq macro to append to debugbuf for later output. This avoids delays when debugging web responses
+-Increase max string length of ReadStringFromEEPROM from 60 to 65
+-urldecode, avoids Strings, returns char*, expects length.
+-urlencode, expects char* vs String (still returns String). Simplified via nibble2hex.
+-HTMLencode added inorder to support all strings for scanf codes. 
+-Optional support for NeoPixel LEDs. NOT enabled by default.
+-Start on a command processor language from server response or user input
+BUGFIX:
+IO pin 10 is NOT usable as SERIAL_ENABLE_PIN, back to IO5 D1
+parseServer p1,p2 had not been initialized. Data returned from server for device could be lost.
+
 Version: 1.3.1  - 2018-02-12 by James Newton 
 Support for ST7735 and ILI9341 and other LCD displays via TFT_eSPI
 
@@ -94,14 +132,16 @@ DB9
 /* DISPLAY / DEBUG: Select at most 1 display type. 
 No workee... you also have to set it in the TFT_eSPI user_setup_select.h file
 */
-//#define TFT_ADAFRUIT_2088 //original 128x128
+#define TFT_ADAFRUIT_2088 //original 128x128
 //#define TFT_ADAFRUIT_358 //new 128x160
 //#define TFT_ILI9341
-#define EPAPER 1.5
+//#define EPAPER 1.5
 
 //to drive NeoPixels, SK6812, WS2811, WS2812 and WS2813 with hex P command.
 //#define PIXELS 26
-#define DEBUGGING
+#define DEBUGGING 1
+//1 for serial only.
+//2 for serial and TFT
 
 
 /* PIN SETUP: Note these are GPIO numbers, NOT "D" number ala NodeMCU
@@ -117,8 +157,9 @@ static const uint8_t D8   = 15;
 static const uint8_t D9   = 3;
 static const uint8_t D10  = 1;
 */
-//#define SERIAL_ENABLE_PIN 5
-#define SERIAL_ENABLE_PIN 10
+
+#define SERIAL_ENABLE_PIN 5
+//#define SERIAL_ENABLE_PIN 10 //NO! IO 10 is NOT available.
 //AkA CONNECT in web config or F_ON (force on) in schematic. 
 //Changed from pin GPIO5 to GPIO10 (aka NodeMCU SD D3 or just SD3) on 02/15/2018
 #define WAS_BLINK 4 //D2
@@ -134,7 +175,7 @@ static const uint8_t D10  = 1;
 //#define RTS_OUT 14 
 //RTS not used or connected to sleep. GPIO14, D5 used as TFT_DC
 
-//TODO: Support user configurable device baud rate
+//Default: user configurable device baud rate on device screen
 //#define BAUD_RATE 38400
 #define BAUD_RATE 9600
 
@@ -147,6 +188,8 @@ static const uint8_t D10  = 1;
 //set to 0 to never disable
 
 #define ACCESS_POINT_NAME  "MassMind.org@192.168.4.1"
+//Change this to whatever you like. E.g.
+//#define ACCESS_POINT_NAME  "Dascor@192.168.4.1"
 /*
 Section 7.3.2.1 of the 802.11-2007 specification 
 http://standards.ieee.org/getieee802/download/802.11-2007.pdf 
@@ -297,10 +340,13 @@ int streamBufLine = 0;
 boolean xoff=false; //flag to see if we need to hold off xmit until device is ready
 boolean havedata = false; //flag to indicate data in rxbuf so we don't have to check length each loop.
 String rxbuf = ""; //buffer for data recieved from device.
+String txbuf = ""; //buffer for data to send to the device.
 #define RFBUF_MAX 128 
 
 int reading1,reading2,reading3; //extracted value from datastream for local display.
 short readingcount = 0;
+
+byte pwrondelay = 0; //countdown to send power on string to device
 
 //If Xoff, recieve bytes until Xon before sending byte.
 void putc_x(byte b) {
@@ -449,13 +495,14 @@ void setup ( void ) {
   strip.Begin();
   strip.Show();
 #endif
-
+  pwrondelay = config.pwrondelay;
   if (config.Connect) {
     digitalWrite(SERIAL_ENABLE_PIN, HIGH);
     debugln("Device port enabled","");
     }
   else {
     debugln("Device port disabled","");
+    pwrondelay = 0; //no point in doing pwr on string if no device.
     }
   readingcount = config.datacount;
   
@@ -490,7 +537,7 @@ void setup ( void ) {
  
 	ConfigureWifi();
 	SPIFFS.begin(); 
-  server.on ( "/", HTTP_GET, handle_root  ); //main web page in Page_Root.h
+  server.on ( "/root", HTTP_GET, handle_root  ); //main web page in Page_Root.h
 	server.on ( "/admin.html", HTTP_GET, [](AsyncWebServerRequest *request) { //settings menu
 #ifdef DEBUGGING
 	  debugbuf += "admin.html";
@@ -505,7 +552,6 @@ void setup ( void ) {
   server.on ( "/device.html", HTTP_GET, send_device_html  ); //in Pages.h
   server.on ( "/device.html", HTTP_POST, send_device_html  ); //in Pages.h
   server.on ( "/update", HTTP_GET, send_fs_html  ); //in Pages.h
-  //server.onFileUpload(handle_fs_upload); //in Pages.h
   server.on ( "/update", HTTP_POST, [](AsyncWebServerRequest *request){
       request->send(200);
     }, handle_fs_upload  ); //in Pages.h
@@ -548,8 +594,11 @@ void setup ( void ) {
 	server.on ( "/admin/devicename", HTTP_GET, send_devicename_value_html);
   server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){  
     if (request->hasArg("text")) {
-      writeStr_x(parseServer(request->arg("text"))); //pass on what was sent less server msgs
-      Serial.flush(); //complete the send before going on
+      txbuf = parseServer(request->arg("text"));
+      writeStr_x(txbuf); //pass on what was sent less server msgs
+      Serial.flush(); //complete the send before going on TODO: Can we wait that long?
+      debugq("<"+txbuf);
+      txbuf="";
       rxbuf=""; havedata=false; //done with that data. TODO: Why are we doing this here?
       //delay(10); //give the device time to respond //nope, can't 'cause AsyncWebServer, get it next browser request
       checkSerial(0); // get any text that comes back now //parameter is delay, must be 0 with AsyncWebServer
@@ -609,7 +658,7 @@ void setup ( void ) {
         }
       }
     });
-	server.onNotFound ( [](AsyncWebServerRequest *request) { 
+	server.onNotFound ( [](AsyncWebServerRequest *request) { //TODO: serve root if no 
 #ifdef DEBUGGING
 	  debugbuf+="404:";
 	  debugbuf+=request->url(); 
@@ -853,11 +902,20 @@ void loop ( void ) {
         }
 #endif
       }
-
+      
+    if (pwrondelay) { //waiting to send power on string
+      debugq(String(pwrondelay--));
+      if (!pwrondelay) { 
+        writeStr_x(config.pwronstr); 
+        debugq("<"+String(config.pwronstr));
+        } 
+      }
+      
 #ifdef DEBUGGING
     if (debugbuf.length()>0) {
       debugln(debugbuf,"");
   #ifdef TFT_DISPLAY
+  #if DEBUGGING == 2
       tft.setCursor(debug_x, debug_y);
       tft.setTextColor(TFT_WHITE,TFT_BLUE);    tft.setTextFont(1); tft.setTextSize(1);
       tft.println(debugbuf);
@@ -866,6 +924,7 @@ void loop ( void ) {
       if (debug_y > TFT_DEBUG_END) {
         debug_x=1; debug_y=TFT_DEBUG_START;
         }
+  #endif
   #endif
       debugbuf="";
       }
@@ -882,7 +941,8 @@ void loop ( void ) {
       showreading(String(config.dataslope3*(float)reading3+config.dataoffset3)+config.dataname3,-TFT_WIDTH,TFT_HEIGHT/1.5,4);
       }
 #endif
-    }
+
+    } // End 1 second Refresh tick
 
 
   } // main loop
