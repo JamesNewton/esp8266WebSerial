@@ -1,47 +1,118 @@
-<!doctype html>
+<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<script src="microajax.js"></script> 
 <html>
   <head>
     <title>ESP8266 IOT Serial to Web</title>
     <style>
       body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }
+      .units {font-size: large; color: black;}
+      .values {font-size: large; color: black;}
     </style>
   <meta charset="utf-8" />
   </head>
   <body>
+  <script>
+
+var logger = {}
+logger.channel = [{},{},{},{},{},{},{},{}] //array of 8 objects
+
+function log(msg) {
+    console.log(msg);
+    }
+    
+function ajax(data, callback) {
+  var xhttp = new XMLHttpRequest()
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      if ("?\n" == this.responseText) { //yike! Logger in bootloader?
+        ajax("/data?text=G%0D",function(){}); //send a G\
+        }
+      log("recv:"+escape(this.responseText))
+      callback(this.responseText)
+      }
+    }
+  xhttp.open("GET", data, true)
+  xhttp.send()
+  log("sent:"+data)
+  }
+
+function getData() {
+  ajax("/data", function(reply) {
+    document.getElementById("log").innerHTML += reply;
+    });
+  logger.timeout = setTimeout(function(){getData()},1000);
+  }
+
+function sendData(form) {
+    var msg = form.txt.value;
+  form.txt.value = "";
+  var response = "";
+  if (form.crlf.checked) msg+='\r';
+  //console.log(form.crlf.checked);
+  ajax("/data?text="+escape(msg), function(reply) {
+    document.getElementById("log").innerHTML += escape(reply);
+    });
+  document.getElementById("log").innerHTML += "<b>"+msg+"</b>";
+  logger.timeout = setTimeout(function(){getData()},200);
+
+function getLogger(state) {
+  log("State:"+state);
+  switch(state) {
+  case 0:
+    clearTimeout(logger.timeout) //no interruptions
+     getData();//ok to interrupt and clear any remaining data
+    break;
+  default:
+    return false;
+      }
+  }
+
+function getReadings() {
+  function dispReadings(read) {
+    var data = read.split("_")
+    for (var i=0; i<3; i++) {
+      var ch = logger.channel[i]
+      var x = parseInt(data[i+1].substr(0,4),16)
+      var y = ch.slope * x + ch.offset
+      document.getElementById("channel"+i+"value").innerHTML = y.toPrecision(4)
+      //getData();//ok to interrupt and clear any remaining data
+      }
+    }
+    
+  clearTimeout(logger.timeout) //no interruptions
+
+  ajax("/data?text=r%0D",function(read){
+    setTimeout(function(){ajax("/data",dispReadings)},500)
+
+    })
+  }
+
+</script>
+    <input type="submit" value="Connect" onClick="getLogger(0);">
+    <div id='status'></div>
+    <div id='readings' style="display: none;">
+    <input type="submit" value="Read" onClick="getReadings();">
+      <table>
+        <tr>
+          <td><div id="channel0units" class="units"></div></td>
+          <td><div id="channel0value" class="values">...</div></td>
+          </tr>
+        <tr>
+          <td><div id="channel1units" class="units"></div></td>
+          <td><div id="channel1value" class="values">...</div></td>
+          </tr>
+        <tr>
+          <td><div id="channel2units" class="units"></div></td>
+          <td><div id="channel2value" class="values">...</div></td>
+          </tr>
+        </table>
+    </div>
     <pre><div id='log'></div></pre>
     <p>
-    <form id='msg' action='data' method='get'>
-    <input id='txt' name='text' type='text'></input><input id='crlf' type='checkbox' checked>+cr?</input>
-    </form></p>
-    <p><a href="/admin.html">Settings</a> <!-- <a href="/file?start=1">Stream</a> --> </p>
-    <script type='text/javascript' src='/jquery-3.3.1.min.js'></script>
-    
-    <script type='text/javascript'>
-$('#msg').submit(function(){ 
-    var clientmsg = $('#txt').val();
-    if ($('#crlf').is(':checked')) clientmsg+='\r';
-    var log=$('#log');
-    log.html(log.html()+'<b>'+clientmsg+'</b>');
-    $.get('data', {text: clientmsg}, function(html){
-        log.html(log.html()+html);
-        });
-    $('#txt').attr('value', '');
-    loadLog(); //instantly pick up any response.
-    return false;
-  });
-function loadLog(){
-  var log=$('#log');
-  $.ajax({
-      url: 'data',
-      cache: false,
-      success: function(html){
-        log.html(log.html()+html);
-        },
-    });
-  };
- setInterval (loadLog, 2500);
-      </script>
-  </body>
+    <form id='msg' action='data' method='get' onSubmit="sendData(this);return false;">
+    <input id='txt' name='text' type='text'><input id='crlf' type='checkbox' checked><label for="crlf">+cr?</label>
+    </form>
+    <p><a href="/admin.html">Settings</a>
+
+</body>
 </html>
